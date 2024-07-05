@@ -1,0 +1,649 @@
+---
+title: recency-surveillance
+authors:
+  - name: Daniel
+    affiliation: The University
+    roles: writing
+    corresponding: true
+bibliography: references.bib
+---
+
+## Section
+
+This is a simple placeholder for the manuscript's main document [@knuth84].
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+
+library(tidyverse)
+library(data.table)
+library(gt)
+library(sjlabelled)
+library(sjmisc)
+library(lubridate)
+library(epiR)
+library(epitools)
+library(gtsummary)
+library(freqtables)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+data <- read.csv("data/fact_recency_case.csv") |>
+  mutate(enrollement_date = lubridate::dmy(date_of_enrollment),
+         enroll_year = lubridate::year(enrollement_date),
+         enroll_month = lubridate::month(enrollement_date, label = TRUE),
+         enroll_quarter = lubridate::quarter(enrollement_date)) |>
+  filter(enrollement_date  >= "2021-04-01" & enrollement_date <= "2024-03-31") # up to March 31st 2024?
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+# Create and label the data frame
+clean_data <- data %>%
+  transmute(
+    age = age_at_enrolment,
+    age_group = cut(age, 
+                    breaks = c(0, 14, 19, 24, 29, 120),
+                    labels = c("<15", "15-19", "20-24", "25-29", "30+")
+                   ),
+    sex = factor(case_when(
+      sex == "Female" ~ "Female",
+      sex == "Male" ~ "Male",
+      TRUE ~ NA_character_
+    )),
+    pregnant = factor(case_when(
+      sex == "Female" & pregnancy_status == "No" ~ "Not pregnant",
+      sex == "Female" & pregnancy_status == "Yes" ~ "Pregnant",
+      sex == "Male" ~ NA_character_,
+      TRUE ~ NA_character_
+    )), 
+    testing_history = factor(case_when(
+      tested_hiv_before_encounter_date == "Yes" ~ "Ever tested",
+      tested_hiv_before_encounter_date == "No" ~ "Never tested",
+      TRUE ~ NA_character_
+    )), 
+    since_last_test = factor(case_when(
+      last_tested_hiv_before_encounter == "Tested <6 months ago" ~ "<6 months",
+       last_tested_hiv_before_encounter == "Tested 6-12 months ago" ~ "6-12 months",
+      last_tested_hiv_before_encounter == "Tested 13-24 months ago" ~ "13-24 months",
+      last_tested_hiv_before_encounter == "Tested more than 2 years ago" ~ ">2 years",
+      tested_hiv_before_encounter_date ==  "No" ~ "Never tested",
+      TRUE ~ NA_character_),
+      levels = c("<6 months", "6-12 months", "13-24 months", ">2 years", "Never tested")),
+    
+    prep_use = factor(case_when(
+      taking_or_ever_taken_prep == "No" ~ "Never",
+      taking_or_ever_taken_prep %in% c("Yes, ever taken PrEP", "Yes, currently on PrEP") ~ "Ever/ Currently",
+      TRUE ~ NA_character_
+    )),
+    
+    modality = factor(case_when(modality == "OPD" ~ "Other PITC",
+                                modality == "" ~ NA_character_,
+                         TRUE ~ modality)),
+    
+    other_pitc = factor(case_when(modality == "Other PITC" ~ initial_hts_testing_location,
+                           TRUE ~ NA_character_)),
+    
+    pns_identified = factor(case_when(is_identified_through_pns == 0 ~ "No",
+                               is_identified_through_pns == 1 ~ "Yes",
+                               TRUE ~ NA_character_)),
+    
+    recency_result = factor(case_when(
+      final_recency_result == "Longterm" ~ "Longterm",
+      final_recency_result == "Recent" ~ "Recent",
+      TRUE ~ NA_character_
+    )),
+  ) %>%
+  filter(!is.na(recency_result)) %>%
+  filter(age_group %in% c("15-19", "20-24", "25-29")) %>%
+  droplevels()
+
+# check age
+#clean_data |> group_by(age_group) |> frq(age)
+  
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+library(sjlabelled)
+
+
+# Apply labels
+clean_data <- clean_data %>%
+  mutate(
+    age =  sjlabelled::set_label(age, "Age at Enrollment"),
+    age_group = sjlabelled::set_label(age_group, "Age Group"),
+    sex = sjlabelled::set_label(sex, "Gender"),
+    pregnant = sjlabelled::set_label(pregnant, "Pregnancy status"),
+    testing_history = sjlabelled::set_label(testing_history, "Testing History"),
+    since_last_test = sjlabelled::set_label(since_last_test, "Time since last test"),
+    prep_use = sjlabelled::set_label(prep_use, "PrEP use"),
+    modality = sjlabelled::set_label(modality, "Testing modality"),
+    other_pitc = sjlabelled::set_label(other_pitc, "Breakdown of other PITC"),
+    pns_identified = sjlabelled::set_label(pns_identified, "Identified throgh PNS"),
+    recency_result = sjlabelled::set_label(recency_result, "Recency result")
+  ) 
+
+
+
+```
+
+The table reveals statistically significant differences between long-term and recent groups in terms of age distribution, time since the last test and PrEP use, while gender, pregnancy status, and testing history do not show significant differences.
+
+```{r}
+#| fig-width: 10
+
+# Generate GT table
+table_one <- clean_data %>%
+  select(age_group, sex, pregnant, testing_history, since_last_test, prep_use, recency_result) %>%
+  tbl_summary(
+    by = recency_result,
+    statistic = list(all_continuous() ~ "{median} ({sd})", all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ 2,
+    missing = "no"
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Final recency result**") %>%
+  as_gt() %>%
+  tab_style(
+    style = list(cell_borders(sides = "all", color = "gray", weight = px(1)),
+                 cell_text(color = "black")),
+    locations = cells_body()
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_spanners()
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font(name = "Roboto Condensed")
+    )
+  ) |>
+  tab_options(data_row.padding = px(0.5))
+
+gtsave(table_one, "output/table_1.png")
+
+table_one
+```
+
+```{r}
+# Save the gt table as HTML
+gtsave(table_one, "table_1.html")
+gtsave(table_one, "output/table_1.html")
+
+# Open the HTML file and copy the table
+browseURL("output/table_1.html")
+
+```
+
+## Summarize by indicator
+
+## Age Analysis
+
+```{r}
+
+rita_data <- clean_data %>%
+      freq_table(age_group, recency_result, percent_ci = 95, drop = TRUE) |>
+      freq_format(
+        recipe = "percent_row (lcl_row - ucl_row)",
+        name = "percent_95",
+        digits = 2
+  ) |>
+  select(row_var, row_cat, col_cat, n, n_row, percent_95) |>
+  mutate(across(where(is.numeric), as.character)) |>
+  pivot_longer(cols = n : percent_95) |>
+  pivot_wider(names_from = c("col_cat", "name"),
+              values_from = value,
+              names_glue = "{col_cat}_{name}") |>
+  select(row_var, row_cat, Recent_n, Longterm_n, Recent_n_row, Recent_percent_95) |>
+  arrange(desc(row_cat))
+
+
+# Summarize
+df <- clean_data %>%
+      freq_table(age_group, recency_result, percent_ci = 95, drop = TRUE) |>
+  select(row_cat, col_cat, n) |>
+  pivot_wider(names_from = col_cat, values_from = n) |>
+  rename(age_group = row_cat)
+
+# Step 2: Convert the dataframe to a matrix (excluding the 'Name' column)
+df_matrix <- as.matrix(df[, -1])
+
+# Set row and column names
+rownames(df_matrix) <- df$age_group
+colnames(df_matrix) <- colnames(df)[-1]
+
+riskratios_all <- riskratio(df_matrix, rev="rows") 
+riskratios <- rownames_to_column(as.data.frame(riskratios_all$measure),
+                                 var = "var") |>
+  transmute(var = var,
+            cpr = paste0(round((estimate),2), "(", round((lower),2), " - ", round((upper),2) ,")"))
+
+# Bring it together
+result_var <- rita_data |>
+  left_join(riskratios, by = c("row_cat" = "var"))
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(epitools)
+
+process_data <- function(clean_data, variable_name) {
+  # Dynamically use the variable_name in freq_table
+  rita_data <- clean_data %>%
+    filter(!is.na(!!sym(variable_name))) |>
+    freq_table(!!sym(variable_name), recency_result, percent_ci = 95, drop = TRUE) %>%
+    freq_format(
+      recipe = "percent_row (lcl_row - ucl_row)",
+      name = "percent_95",
+      digits = 2
+    ) %>%
+    select(row_var, row_cat, col_cat, n, n_row, percent_95) %>%
+    mutate(across(where(is.numeric), as.character)) %>%
+    pivot_longer(cols = n:percent_95) %>%
+    pivot_wider(
+      names_from = c("col_cat", "name"),
+      values_from = value,
+      names_glue = "{col_cat}_{name}"
+    ) %>%
+    select(row_var, row_cat, Recent_n, Longterm_n, Recent_n_row, Recent_percent_95) %>%
+    arrange(desc(row_cat))
+  
+  # Summarize data
+  df <- clean_data %>%
+    filter(!is.na(!!sym(variable_name))) |>
+    freq_table(!!sym(variable_name), recency_result, percent_ci = 95, drop = TRUE) %>%
+    select(row_cat, col_cat, n) %>%
+    pivot_wider(names_from = col_cat, values_from = n) %>%
+    rename(variable_group = row_cat)
+  
+  # Convert the dataframe to a matrix (excluding the 'variable_group' column)
+  df_matrix <- as.matrix(df[, -1])
+  
+  # Set row and column names
+  rownames(df_matrix) <- df$variable_group
+  colnames(df_matrix) <- colnames(df)[-1]
+  
+  # Calculate risk ratios
+  riskratios_all <- riskratio(df_matrix, rev="rows")
+  riskratios <- rownames_to_column(as.data.frame(riskratios_all$measure), var = "var") %>%
+    transmute(var = var,
+              cpr = paste0(round((estimate), 2), "(", round((lower), 2), " - ", round((upper), 2), ")"),
+              estimate = estimate,
+              lower = lower,
+              upper = upper)
+  
+  # Combine results
+  result_var <- rita_data %>%
+    left_join(riskratios, by = c("row_cat" = "var"))
+  
+  return(result_var)
+}
+
+
+```
+
+```{r}
+
+# Example usage:
+age_group_r <- process_data(clean_data, "age_group")
+sex_r <- process_data(clean_data, "sex")
+pregnant_r <- process_data(clean_data, "pregnant")
+testing_history_r <- process_data(clean_data, "testing_history")
+since_last_test_r <- process_data(clean_data, "since_last_test")
+prep_use_r <- process_data(clean_data, "prep_use")
+#modality_r <- process_data(clean_data, "modality")
+#other_pitc_r <- process_data(clean_data, "other_pitc")
+#pns_identified_r <- process_data(clean_data, "pns_identified")
+```
+
+```{r}
+combined_results <- bind_rows(
+  age_group_r,
+  sex_r,
+  pregnant_r,
+  testing_history_r,
+  since_last_test_r,
+  prep_use_r
+) |>
+  mutate(cpr = case_when(
+    str_detect(cpr, "NA") ~ "Ref",  # Check for the string "NA"
+    TRUE ~ cpr
+  ))
+
+```
+
+
+```{r}
+#| fig-width: 10
+
+# Generate GT table
+table_two <- combined_results %>%
+  select(row_var : cpr) %>%
+  mutate(row_var = case_match(row_var,
+                              "age_group" ~ "Age",
+                              "sex" ~ "Gender",
+                              "pregant" ~ "Pregnancy Status",
+                              "testing_history" ~ "Testing History",
+                              "since_last_test" ~ "Time since last test",
+                              "prep_use" ~ "PrEP use",
+                              .default = row_var))|>
+  gt(
+    groupname_col = "row_var"
+  )|>
+  tab_style(
+    style = list(cell_borders(sides = "all", color = "gray", weight = px(1)),
+                 cell_text(color = "black")),
+    locations = cells_body()
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_spanners()
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font(name = "Roboto Condensed")
+    )
+  ) %>%
+  cols_label(
+    row_cat = "Characteristic",
+    Recent_n = "# of RITA Recent",
+    Longterm_n = "# of RITA Longterm",
+    Recent_n_row = "Valid RTRI results",
+    Recent_percent_95 = "% Recent (95% CI)",
+    cpr = "Crude Prevalence Ratio (95% CI)"
+  ) %>%
+  tab_options(data_row.padding = px(1))
+
+gtsave(table_two, "output/table_2.png")
+
+table_two
+```
+
+```{r}
+# Save the gt table as HTML
+gtsave(table_two, "table_2.html")
+gtsave(table_two, "output/table_2.html")
+
+# Open the HTML file and copy the table
+browseURL("output/table_2.html")
+
+```
+
+
+
+
+
+```{r}
+df <- combined_results |>
+  transmute(Characteristics = case_match(row_var,
+                              "age_group" ~ "Age",
+                              "sex" ~ "Sex",
+                              "pregant" ~ "Pregnancy status",
+                              "testing_history" ~ "Testing history",
+                              "since_last_test" ~ "Time since last test",
+                              "prep_use" ~ "PrEP Use",
+                              .default = row_var),
+            strata = row_cat,
+            RITARecent = Recent_n,
+            RITALongterm = Longterm_n,
+            NewDiagnoses = Recent_n_row,
+            PercentRITARecent = Recent_percent_95,
+            PrevalenceRatio = cpr,
+            cPR = estimate,
+            lcl = lower,
+            ucl = upper
+            ) 
+
+level_order <- c('Age', 'Sex', 'Pregnancy status', 'Testing history', 'Time since last test', 'PrEP Use')
+
+prev_ratios <- df %>% 
+  #filter(Group=="Total") 
+  mutate(
+  Characteristics = fct_relevel(Characteristics, "Age", "Sex", "Pregnancy status", "Pregnant by Age Group", "Non-pregnant by Age Group", "Testing history", "Time since last test", 'PrEP Use', "Testing modality", "Identified through PNS"),
+  strata = fct_reorder(strata, cPR)
+) %>%
+  ggplot(aes(x = factor(strata), y = cPR, group = factor(Characteristics, levels = level_order))) +
+  geom_point(aes(colour = factor(Characteristics, levels = level_order)), position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(colour = factor(Characteristics, levels = level_order), ymin = lcl, ymax = ucl), position = position_dodge(width = 0.5)) +
+  geom_hline(yintercept = 1) +
+  scale_y_continuous(expand = c(0, 0), limit = c(0,5,1)) +
+  coord_flip() +
+  facet_grid(rows = vars(Characteristics), scales = "free_y", switch = "y", space = "free_y") +
+  theme(
+    plot.margin = margin(0.5, 0.5, 0.5, 0.5, unit = "cm"),
+    plot.title = element_text(size = 15, face = "bold", hjust = 0),
+    strip.text.y = element_text(size = 15),
+    strip.placement = "outside",
+    axis.title.x = element_text(margin = margin(t = 0.5, b = 0.5, unit = "cm"), size = 15),
+    axis.title.y = element_blank(),
+    axis.text = element_text(size = 15),
+    legend.position = "none",
+    panel.grid.major.y = element_blank(),
+    strip.text.y.left = element_text(angle = 0),
+  ) + labs(y = "Crude Prevalence Ratio")
+
+print(prev_ratios)
+
+ggsave(prev_ratios, 
+       filename = "prev.png",
+       width = 20, height = 20, units = "cm")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Modelling
+
+```{r}
+
+model_data <- clean_data |>
+  select(age_group, sex, pregnant, testing_history, since_last_test, prep_use,
+         recency_result) |>
+  mutate(pregnant = case_when(sex == "Male" ~ "N/A",
+                              TRUE ~ pregnant)) |>
+  mutate(recency_result = case_when(as.numeric(recency_result) == 1 ~ 0,
+                                    as.numeric(recency_result) == 2 ~ 1,
+                                    TRUE ~ NA_integer_)
+                                    ) |>
+  drop_na()
+
+dim(model_data)
+
+```
+
+```{r}
+model_data |> freq_table(recency_result)
+```
+
+```{r}
+
+# Change Reference categories
+model_data$age_group <- relevel(factor(model_data$age_group), ref = "25-29") 
+model_data$pregnant <- relevel(factor(model_data$pregnant), ref = "Not pregnant")
+model_data$testing_history <- relevel(factor(model_data$testing_history), ref = "Never tested")
+model_data$since_last_test <- relevel(factor(model_data$since_last_test), ref = "Never tested")
+
+```
+
+
+# Adjusted Risk Ratios
+# Using Robust Poisson Regression
+
+```{r}
+
+
+set.seed(123)  # Set a fixed random seed for reproducibility
+
+fit <- glm(recency_result ~ age_group + sex + pregnant + testing_history +
+             since_last_test + prep_use,
+           family = poisson(link = "log"),
+           data = model_data)
+```
+
+```{r}
+# Calculate robust standard errors
+library(sandwich)
+library(lmtest)
+
+robust_se <- sqrt(diag(vcovHC(fit, type = "HC0")))
+```
+
+```{r}
+# Extract coefficients and calculate risk ratios
+coef <- summary(fit)$coefficients
+risk_ratios <- exp(coef[, 1])
+ci_lower <- exp(risk_ratios - 1.96 * robust_se)
+ci_upper <- exp(risk_ratios + 1.96 * robust_se)
+```
+
+```{r}
+# Create a data frame with risk ratios and robust standard errors
+result <- data.frame(
+  Estimate = coef[, 1],
+  "Robust SE" = robust_se,
+  "Risk Ratio" = risk_ratios,
+  "Lower" = ci_lower,
+  "Upper" = ci_upper
+)
+
+result
+```
+
+```{r}
+summary(fit) 
+```
+
+
+## Log-Binomial Model
+```{r}
+# Load necessary library
+library(broom)
+
+# Fit the log-binomial model
+log_binom_model <- glm(recency_result ~ age_group + sex + pregnant + testing_history +
+             since_last_test + prep_use, 
+             family = binomial(link = "log"), 
+             data = model_data)
+
+
+```
+
+
+```{r}
+
+# Summarize the model to view coefficients
+summary(log_binom_model)
+
+```
+
+```{r}
+
+# Extract risk ratios (exponentiated coefficients)
+risk_ratios <- exp(coef(log_binom_model)) |> as.data.frame()
+
+# Display risk ratios
+print(risk_ratios)
+```
+
+
+
+```{r}
+# Extract risk ratios (exponentiated coefficients)
+risk_ratios_lg <- exp(coef(log_binom_model))
+
+# Get confidence intervals for coefficients
+conf_intervals <- confint(log_binom_model)
+
+# Exponentiate the confidence intervals to get risk ratio confidence intervals
+risk_ratio_ci <- exp(conf_intervals)
+
+# p-values 
+model_summary <- summary(log_binom_model)
+p_values <- coef(model_summary)[, "Pr(>|z|)"]
+
+# Combine th
+results_log_binom <- data.frame(
+  Predictor = names(coef(log_binom_model)),
+  Risk_Ratio = risk_ratios_lg,
+  CI_Lower = risk_ratio_ci[, 1],
+  CI_Upper = risk_ratio_ci[, 2]
+)
+
+results_log_binom
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,7 @@
+library(usethis)
+library(gitcreds)
+gitcreds::gitcreds_set()
+usethis::use_git_ignore("data/")
+usethis::use_git_ignore("_manuscript/")
+usethis::use_git()
+usethis::use_github()

@@ -1,0 +1,245 @@
+---
+title: recency-surveillance
+authors:
+  - name: Daniel
+    affiliation: The University
+    roles: writing
+    corresponding: true
+bibliography: references.bib
+---
+
+## Section
+
+This is a simple placeholder for the manuscript's main document [@knuth84].
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+
+library(tidyverse)
+library(data.table)
+library(gt)
+library(sjlabelled)
+library(sjmisc)
+library(lubridate)
+library(epiR)
+library(epitools)
+library(gtsummary)
+library(freqtables)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+data <- read.csv("data/fact_recency_case.csv") |>
+  mutate(enrollement_date = lubridate::dmy(date_of_enrollment),
+         enroll_year = lubridate::year(enrollement_date),
+         enroll_month = lubridate::month(enrollement_date, label = TRUE),
+         enroll_quarter = lubridate::quarter(enrollement_date)) |>
+  filter(enrollement_date  >= "2021-04-01" & enrollement_date <= "2024-03-31") # up to March 31st 2024?
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+data
+
+# Create and label the data frame
+clean_data <- data %>%
+  transmute(
+    age = age_at_enrolment,
+    age_group = cut(age, 
+                    breaks = c(0, 14, 19, 24, 29, 120),
+                    labels = c("<15", "15-19", "20-24", "25-29", "30+")
+                   ),
+    sex = factor(case_when(
+      sex == "Female" ~ "Female",
+      sex == "Male" ~ "Male",
+      TRUE ~ NA_character_
+    )),
+    pregnant = factor(case_when(
+      sex == "Female" & pregnancy_status == "No" ~ "Not pregnant",
+      sex == "Female" & pregnancy_status == "Yes" ~ "Pregnant",
+      sex == "Male" ~ "N/A (Male)",
+      TRUE ~ NA_character_
+    )), 
+    testing_history = factor(case_when(
+      tested_hiv_before_encounter_date == "Yes" ~ "Ever tested",
+      tested_hiv_before_encounter_date == "No" ~ "Never tested",
+      TRUE ~ NA_character_
+    )), 
+    since_last_test = factor(case_when(
+      last_tested_hiv_before_encounter == "Tested <6 months ago" ~ "<6 months",
+       last_tested_hiv_before_encounter == "Tested 6-12 months ago" ~ "6-12 months",
+      last_tested_hiv_before_encounter == "Tested 13-24 months ago" ~ "13-24 months",
+      last_tested_hiv_before_encounter == "Tested more than 2 years ago" ~ ">2 years",
+      tested_hiv_before_encounter_date ==  "No" ~ "Never tested",
+      TRUE ~ NA_character_),
+      levels = c("<6 months", "6-12 months", "13-24 months", ">2 years", "Never tested"), ordered = TRUE),
+    
+    prep_use = factor(case_when(
+      taking_or_ever_taken_prep == "No" ~ "Never taken",
+      taking_or_ever_taken_prep == "Yes, ever taken PrEP" ~ "Ever taken",
+      taking_or_ever_taken_prep == "Yes, currently on PrEP" ~ "Currently taking",
+      TRUE ~ NA_character_
+    )),
+    
+    recency_result = factor(case_when(
+      final_recency_result == "Longterm" ~ "Longterm",
+      final_recency_result == "Recent" ~ "Recent",
+      TRUE ~ NA_character_
+    )),
+  ) %>%
+  filter(!is.na(recency_result)) %>%
+  filter(age_group %in% c("15-19", "20-24", "25-29")) %>%
+  droplevels()
+
+# check age
+#clean_data |> group_by(age_group) |> frq(age)
+  
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| results: hide
+#| warning: false
+
+# Apply labels
+clean_data <- clean_data %>%
+  mutate(
+    age = set_label(age, "Age at Enrollment"),
+    age_group = set_label(age_group, "Age Group"),
+    sex = set_label(sex, "Gender"),
+    pregnant = set_label(pregnant, "Pregnancy status"),
+    testing_history = set_label(testing_history, "Testing History"),
+    since_last_test = set_label(since_last_test, "Time since last test"),
+    prep_use = set_label(prep_use, "PrEP use"),
+    recency_result = set_label(recency_result, "Recency result")
+  ) 
+
+```
+
+The table reveals statistically significant differences between long-term and recent groups in terms of age distribution, time since the last test and PrEP use, while gender, pregnancy status, and testing history do not show significant differences.
+
+```{r}
+# Generate GT table
+table_one <- clean_data %>%
+  select(age_group, sex, pregnant, testing_history, since_last_test, prep_use, recency_result) %>%
+  tbl_summary(
+    by = recency_result,
+    statistic = list(all_continuous() ~ "{median} ({sd})", all_categorical() ~ "{n} ({p}%)"),
+    digits = all_continuous() ~ 2,
+    missing = "no"
+  ) %>%
+  add_overall() %>%
+  add_p() %>%
+  modify_header(label ~ "**Characteristic**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Final recency result**") %>%
+  as_gt() %>%
+  tab_style(
+    style = list(cell_borders(sides = "all", color = "gray", weight = px(1)),
+                 cell_text(color = "black")),
+    locations = cells_body()
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_spanners()
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font(name = "Roboto Condensed")
+    )
+  ) |>
+  tab_options(data_row.padding = px(1))
+
+table_one
+```
+
+```{r}
+# Function to calculate risk ratio
+calculate_risk_ratio <- function(df, outcome, predictor) {
+  table <- table(df[[predictor]], df[[outcome]])
+  rr <- epi.2by2(table, method = "cohort.count")
+  return(rr)
+}
+
+
+# List of predictor variables
+predictor_vars <- c("age_group", "sex", "pregnant", "testing_history", "since_last_test", "prep_use")
+
+# Calculate risk ratios for each predictor variable
+results <- lapply(predictor_vars, function(var) {
+  list(variable = var, risk_ratio = calculate_risk_ratio(clean_data, "recency_result", var))
+})
+
+# Print the results
+results
+```
+
+```{r}
+model_data |> freq_table(recency_result)
+```
+
+```{r}
+
+model_data <- clean_data |>
+  select(age_group, sex, pregnant, testing_history, since_last_test, prep_use, recency_result) |>
+  drop_na() |>
+  sample_frac(size = 0.005)
+
+dim(model_data)
+
+```
+
+```{r}
+library(logbin)
+
+set.seed(123)  # Set a fixed random seed for reproducibility
+
+rr_model <- logbin(recency_result ~ age_group + sex + pregnant + testing_history + since_last_test + prep_use,
+                     , data = model_data)
+```
+
+```{r}
+# Calculate robust standard errors
+robust_se <- sqrt(diag(vcovHC(poisson_model, type = "HC0")))
+
+robust_se
+```
+
+```{r}
+# Summarize the model with robust standard errors
+coeftest(poisson_model, vcov = vcovHC(poisson_model, type = "HC0"))
+```
+
+```{r}
+# Calculate Risk Ratios (RRs)
+RRs <- exp(coef(poisson_model))
+RRs
+```
+
+```{r}
+# Output the results
+summary(poisson_model)
+RRs
+```

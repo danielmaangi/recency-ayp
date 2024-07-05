@@ -1,0 +1,1378 @@
+---
+title: recency-surveillance
+authors:
+  - name: Daniel
+    affiliation: The University
+    roles: writing
+    corresponding: true
+bibliography: references.bib
+---
+
+## Section
+
+This is a simple placeholder for the manuscript's main document [@knuth84].
+
+```{r}
+library(passport) 
+library(kableExtra) 
+library(scales) 
+library(RcppRoll) 
+library(sf) 
+#library(rgdal) 
+library(gt)
+library(extrafont)
+library(haven)
+library(tidyr)
+library(dplyr)
+#library(survey)
+library(lubridate)
+library(ggplot2)
+library(formattable)
+library(ggpol)
+library(ggrepel)
+#library(readxl)
+library(flextable)
+library(officer)
+#library(rio)
+library(stringr)
+library(tidyverse)
+library(outbreaks)
+#library(pubh)
+library(huxtable)
+library(broom)
+library(ggfortify)
+library(sjlabelled)
+library(lmtest)
+library(foreign)
+library(janitor)
+library(freqtables)
+#library(reshape2)
+library(data.table)
+library(vroom)
+library(Epi)
+library(popEpi)
+library(epitools) #Risk Ratio Function
+library(forcats) #For Prev Ratios Graphic
+library(ggplot2)
+#library(xlsx)
+#library(survey)       # for survey functions
+#library(srvyr)        # dplyr wrapper for survey package
+library(gtsummary)    # wrapper for survey package to produce tables
+# install.packages
+#install.packages("srvyr")
+# install.packages("epiR", repos = "https://cran.r-project.org/src/contrib/epiR_2.0.54.tar.gz")
+# install.packages("Rtools", repos = "https://cran.rstudio.com/bin/windows/Rtools/")
+#devtools::install_github("https://github.com/mrc-ide/first90release")
+```
+
+```{r data}
+# set date of running the code
+rec_data <- read.csv("data/fact_recency_case.csv", 
+                     stringsAsFactors = FALSE, encoding="UTF-8")
+```
+
+```{r Recency data cleaning}
+#convert date_of_enrollment into a date variable
+rec_data1 <- rec_data %>% 
+                mutate(date_of_enrollment = lubridate::dmy(rec_data$date_of_enrollment),
+                       Month = month(date_of_enrollment),
+                       Year = year(date_of_enrollment),
+                       final_rtri_result = as.factor(final_rtri_result))
+
+# #extract month and year 
+ rec_data1 <- rec_data1 %>% 
+              mutate(Month_Yr = format(as.Date(rec_data1$date_of_enrollment), "%Y-%m"))
+          
+
+#Rename Recency ID variable
+#rec_data1 <- rec_data1 %>% rename(recency_id=X.U.FEFF.recency_id)
+#rec_data1 <- rec_data1 %>% rename(recency_id=ï..recency_id)
+
+##check dates
+#check.fy <- rec_data1 %>% select(recency_id, date_of_enrollment, Month_Yr, Month, Year, FY)
+check.dates <- rec_data1 %>% select(recency_id, Month_Yr, date_of_enrollment) #edit/remove rows in case any are incorrect
+#check.USGperiod <- rec_data1 %>% select(Month_Yr, date_of_enrollment, FY, Month, USG_Period)
+
+  #Correct Obs. with dates of 2023 and re-run Month and Year code to get updated dates
+      rec_data1$date_of_enrollment[rec_data1$date_of_enrollment == "2023-10-25" ] <- "2022-10-25"
+      rec_data1$date_of_enrollment[rec_data1$date_of_enrollment == "2023-08-08" ] <- "2022-08-08" 
+      rec_data1$date_of_enrollment[rec_data1$date_of_enrollment == "2020-09-07" ] <- "2022-09-07"
+      rec_data1$date_of_enrollment[rec_data1$date_of_enrollment == "2021-03-09" ] <- "2022-03-09"  
+      rec_data1$date_of_enrollment[rec_data1$date_of_enrollment == "2020-11-15" ] <- "2022-11-15"
+      rec_data1$date_of_enrollment[rec_data1$recency_id == "REC1573900074"] <- "2023-01-05"
+      
+  #Re-extract Month and Year to include update obs. above
+      rec_data2 <- rec_data1 %>% 
+          mutate(Month_Yr = format(as.Date(rec_data1$date_of_enrollment), "%Y-%m"),
+                 Month = format(as.Date(rec_data1$date_of_enrollment), "%m"),
+                 Year = format(as.Date(rec_data1$date_of_enrollment), "%Y"),
+                 FY = case_when(Year==2021 & Month<10 ~ "FY21",
+                               (Year==2021 & Month>=10) | (Year==2022 & Month<10) ~ "FY22",
+                               (Year==2022 & Month>=10) | (Year==2023 & Month<10) ~ "FY23"),
+                 USG_Period = case_when(Month %in% c("01","02","03") ~ paste(FY,"qtr2", sep="_"),
+                                Month %in% c("04","05","06") ~ paste(FY,"qtr3", sep="_"),
+                                Month %in% c("07","08","09") ~ paste(FY,"qtr4", sep="_"),
+                                Month %in% c("10","11","12") ~ paste(FY,"qtr1", sep="_"))) 
+      
+  #Re-check dates to make sure updated obs. are changed to updated dates
+      check.dates <- rec_data2 %>% select(recency_id, Month_Yr, date_of_enrollment, date_submitted)
+      check.USGperiod <- rec_data2 %>% select(Month_Yr, date_of_enrollment, FY, Month, USG_Period)
+      
+      #Remove rows from before April 2021
+      rec_data2 <- rec_data2 %>%
+        filter(Month_Yr >= "2021-04")
+    
+      #Remove rows from after March 31, 2023 (for manuscript only)
+       rec_data2 <- rec_data2 %>%
+        filter(Month_Yr <= "2023-03")
+    
+      #Clean county names
+    county_names <- rec_data2 %>%
+        select(county) %>%
+        unique()
+        
+      rec_data2 <- rec_data2 %>% 
+        mutate(county = 
+               recode(county, "SIAYA" = "Siaya",
+                              "Muranga" = "Murang'a",
+                              "Trans Nzoia" = "Trans-Nzoia",
+                              "NAIROBI" = "Nairobi")) 
+
+        #Remove Lamu from data (N=64)
+         # rec_data1 <- rec_data1 %>% 
+            #  filter(county != "Lamu")
+                   
+    #Clean sub-county names
+      subcounty_names <- rec_data2 %>%
+          select(county, sub_county) %>%
+          unique()
+    
+      rec_data2 <- rec_data2 %>% 
+            mutate(sub_county = 
+                  recode(sub_county, #Nairobi
+                         "Dagoretti North and South" = "Dagoretti North", 
+                                     "DAGORETTI NORTH" = "Dagoretti North", 
+                                     "EMBAKASI EAST" = "Embakasi East", 
+                                     "Embakasi East and South" = "Embakasi East",
+                                     "EMBAKASI WEST" = "Embakasi West",
+                                     "Embakasi West and Central" = "Embakasi West", #Mama Lucy Kibaki Hospital
+                                     "KAMUKUNJI" = "Kamukunji",
+                                     "Kasarani and Embakasi North" = "Embakasi North", #Dandora 1 Health Centre
+                                     "KASARANI" = "Kasarani",
+                                     "Langatta" = "Langata",
+                                     "MAKADARA" = "Makadara",
+                                     "Ruaraka and Roysambu" = "Ruaraka", #Mathare North Health Centre
+                                     "RUARAKA" = "Ruaraka",
+                                     "STAREHE" = "Starehe",
+                                     "EMBAKASSI NORTH" = "Embakasi North",
+                                    #Siaya
+                                     "ALEGO USONGA" = "Alego Usonga",
+                                     "Alego usonga SC" = "Alego Usonga",
+                                     "Alego-Usonga" = "Alego Usonga",
+                                     "Bondo SC" = "Bondo",
+                                     "Gem Yala SC" = "Gem",
+                                     "Gem Wagai SC" = "Gem",
+                                     "Rarieda SC" = "Rarieda",
+                                     "Uguja SC" = "Unguja",
+                                     "Ugenya SC" = "Ugenya",
+                                     #Mombasa
+                                     "CHANGAMWE" = "Changamwe",
+                                     "Changamwe " = "Changamwe",
+                                     "Mvita " = "Mvita",
+                                     #Kisumu
+                                     "Kisumu west" = "Kisumu West",
+                                     #Homa Bay
+                                     "Homa Bay Town" = "Homa Bay",
+                                    #Muran'ga
+                                      "muranga south" = "Murang'a South")) 
+      
+        #Clean county and sub-county names of client residence
+             
+      names(rec_data2)
+    
+      rec_data2 <- rec_data2 %>%
+        rename(
+          current_county_of_residence_other_text = current_county_of_residence_othe,
+          current_sub_county_of_residence_other_text = current_sub_county_of_residence_)
+      
+      
+          #Clean county names
+              res_county_names <- rec_data2 %>%
+                  select(current_county_of_residence, current_county_of_residence_other_text) %>%
+                  unique()
+        
+                rec_data2 <- rec_data2 %>% 
+                  mutate(current_county_of_residence = 
+                         recode(current_county_of_residence, "Murang'A" = "Murang'a",
+                                                             "Trans Nzoia" = "Trans-Nzoia",
+                                                             "Mombasa " = "Mombasa")) %>%
+                  mutate(res_county = 
+                         case_when(
+                            current_county_of_residence_other_text == "BUSIA-UGANDA" ~ "Uganda",
+                            current_county_of_residence_other_text == "BUSIA-UGUNDA" ~ "Uganda",
+                            current_county_of_residence_other_text == "BUSIA -UGANDA" ~ "Uganda",
+                            current_county_of_residence_other_text == "BUSIA UGANDA" ~ "Uganda",
+                            current_county_of_residence_other_text == "Uganda" ~ "Uganda",
+                            current_county_of_residence_other_text == "UGANDA" ~ "Uganda",
+                            current_county_of_residence_other_text == "NAMAINGO" ~ "Uganda",
+                            current_county_of_residence_other_text == "KIAMBU" ~ "Kiambu",
+                            current_county_of_residence_other_text == "KIRINYAGA" ~ "Kirinyaga",
+                            current_county_of_residence_other_text == "MAKUENI" ~ "Makueni",
+                            current_county_of_residence_other_text == "MISSING ON PAPER" ~ "NULL",
+                            current_county_of_residence_other_text == "muran'ga" ~ "Murang'a",
+                            current_county_of_residence_other_text == "Murang'a" ~ "Murang'a",
+                            current_county_of_residence_other_text == "MURANG'A" ~ "Murang'a",
+                            current_county_of_residence_other_text == "MURANGA" ~ "Murang'a",
+                            current_county_of_residence_other_text == "Muranga" ~ "Murang'a",
+                            current_county_of_residence_other_text == "TANZANIA" ~ "Tanzania",
+                            current_county_of_residence_other_text == "SUBA CENTRAL" ~ "Homa Bay",
+                            current_county_of_residence_other_text == "HOMABAY" ~ "Homa Bay",
+                            current_county_of_residence_other_text == "Homabay" ~ "Homa Bay",
+                            current_county_of_residence_other_text == "Machakos" ~ "Machakos",
+                            TRUE    ~ current_county_of_residence)) 
+                
+                 #Recode certain obs with incorrect values
+                  rec_data2$res_county[rec_data2$recency_id == "REC1307600009"] <- "Nairobi"
+                  rec_data2$res_county[rec_data2$recency_id == "REC1127400009"] <- "Mombasa"
+                  rec_data2$res_county[rec_data2$recency_id == "REC1127400006"] <- "Mombasa"
+                  rec_data2$res_county[rec_data2$recency_id == "REC1127400001"] <- "Mombasa"
+             
+              #Recheck names
+              res_county_names <- rec_data2 %>%
+                select(current_county_of_residence, 
+                       current_county_of_residence_other_text, 
+                       res_county) %>%
+                        unique()
+                
+          #Clean sub-county names
+          res_subcounty_names <- rec_data2 %>%
+              select(current_county_of_residence, 
+                     current_sub_county_of_residence, 
+                     current_sub_county_of_residence_other_text) %>%
+                     unique()
+
+                rec_data3 <- rec_data2 %>%
+                  mutate(current_county_of_residence = 
+                         case_when(
+                          current_sub_county_of_residence_other_text == "Juja" ~ "Kiambu",
+                          current_sub_county_of_residence_other_text == "KAJIADO" ~ "Kajiado",
+                          current_sub_county_of_residence_other_text == "RUIRU" ~ "Kiambu",
+                          current_sub_county_of_residence_other_text == "SIRISIA" ~ "Bungoma",
+                          current_sub_county_of_residence_other_text == "Sirisia" ~ "Bungoma",
+                          current_sub_county_of_residence_other_text == "MTWAPA" ~ "Kilifi",
+                          current_sub_county_of_residence_other_text == "MWATATE" ~ "Taita Taveta",
+                          current_sub_county_of_residence_other_text == "Nambale" ~ "Busia",
+                          current_sub_county_of_residence_other_text == "RONGO" ~ "Migori",
+                          current_sub_county_of_residence_other_text == "Rongo" ~ "Migori",
+                          current_sub_county_of_residence == "Mwatate" ~ "Taita Taveta",
+                          TRUE    ~ current_county_of_residence)) %>%
+                  mutate(res_sub_county = 
+                        case_when(
+                          current_sub_county_of_residence == "Homa Bay Town" ~ "Homa Bay",
+                          current_sub_county_of_residence == "Kabondo" ~ "Kabondo Kasipul",
+                          current_sub_county_of_residence == "New Kasarani" ~ "Kasarani",
+                          TRUE ~ current_sub_county_of_residence)) %>%
+                  mutate(res_sub_county =
+                         case_when(
+                          #Nairobi
+                          current_sub_county_of_residence_other_text == "GITHURAI 44" ~ "Roysambu",
+                          current_sub_county_of_residence_other_text == "KAMULU" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "New Kasarani" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "Embakasi" ~ "Embakasi East",
+                          current_sub_county_of_residence_other_text == "EMBAKASI" ~ "Embakasi West",
+                          current_sub_county_of_residence_other_text == "DANDORA" ~ "Embakasi West",
+                          current_sub_county_of_residence_other_text == "IMARA DAIMA" ~ "Embakasi South",
+                          current_sub_county_of_residence_other_text == "Industalia" ~ "Embakasi South",
+                          current_sub_county_of_residence_other_text == "Juja" ~ "Juja", #Kiambu County
+                          current_sub_county_of_residence_other_text == "KAJIADO" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "Kiambu" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "Ngara" ~ "Kamukunji",
+                          current_sub_county_of_residence_other_text == "NGARA" ~ "Kamukunji",
+                          current_sub_county_of_residence_other_text == "NJIRU" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "Not indicated" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "RUAI" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "RUIRU" ~ "Ruiru",
+                          current_sub_county_of_residence_other_text == "SIRISIA" ~ "Sirisia", #Bungoma sub-county
+                          current_sub_county_of_residence_other_text == "SOUTH B" ~ "Starehe",
+                          current_sub_county_of_residence_other_text == "Zimmerman" ~ "Roysambu",
+                          current_sub_county_of_residence_other_text == "HOMABAY" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "Not indicated" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "MACHAKOS" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "Kiambu" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "KIAMBU" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "NAIROBI" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "Not indicated" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "KABETE" ~ "Kabete", #Kiambu County
+                          current_sub_county_of_residence_other_text == "New Kasarani" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "UTAWALA" ~ "Embakasi East",
+                          current_sub_county_of_residence_other_text == "Wakibumer" ~ "Mathare",
+                          current_sub_county_of_residence_other_text == "KAREN" ~ "Langata",
+                          current_sub_county_of_residence_other_text == "KARIOBANGI NORTH" ~ "Embakasi North",
+                          current_sub_county_of_residence_other_text == "New Kasarani" ~ "Kasarani",
+                          current_sub_county_of_residence_other_text == "" ~ "",
+                          
+                          #Siaya
+                          current_sub_county_of_residence_other_text == "East Gem" ~ "Gem",
+                          current_sub_county_of_residence_other_text == "GOT-RAMUGI" ~ "Bondo",
+                          current_sub_county_of_residence_other_text == "Ukwala" ~ "Ugenya",
+                          #Kisumu
+                          current_sub_county_of_residence_other_text == "Ahero" ~ "Nyando",
+                          #Mombasa
+                          current_sub_county_of_residence_other_text == "MTWAPA" ~ "Kilifi South",
+                          current_sub_county_of_residence_other_text == "MWATATE" ~ "Mwatate", #Taita Taveta County
+                          current_sub_county_of_residence_other_text == "SHANZU, KISAUNI" ~ "Kisauni",
+                          current_sub_county_of_residence_other_text == "MAGONGO" ~ "Changamwe",
+                          current_sub_county_of_residence_other_text == "Tudor" ~ "Mvita",
+                          current_sub_county_of_residence_other_text == "Mtwapa" ~ "Kilifi South",
+                          #Homa Bay
+                          current_sub_county_of_residence_other_text == "HOMABAY" ~ "NULL",
+                          current_sub_county_of_residence_other_text == "KOCHIA" ~ "Rangwe",
+                          current_sub_county_of_residence_other_text == "KOJWACH" ~ "Kabondo Kasipul",
+                          current_sub_county_of_residence_other_text == "MBITA" ~ "Mbita",
+                          current_sub_county_of_residence_other_text == "Mbita" ~ "Mbita",
+                          current_sub_county_of_residence_other_text == "RACHUONYO NORTH" ~ "Karachuonyo",
+                          current_sub_county_of_residence_other_text == "RACHUONYO EAST" ~ "Karachuonyo",
+                          current_sub_county_of_residence_other_text == "RONGO" ~ "Rongo",
+                          current_sub_county_of_residence_other_text == "Suba central" ~ "Suba North",
+                          current_sub_county_of_residence_other_text == "SUBA CENTRAL" ~ "Suba North",
+                          current_sub_county_of_residence_other_text == "KIRINYAGA CENTRAL" ~ "Kirinyaga Central",
+                          current_sub_county_of_residence_other_text == "Maanga" ~ "Manga",
+                          current_sub_county_of_residence_other_text == "Nyanyuki" ~ "Nanyuki",
+                          current_sub_county_of_residence_other_text == "KIGUMO" ~ "Kigumo",
+                          current_sub_county_of_residence_other_text == "BUNYALA" ~ "Bunyala",
+                          current_sub_county_of_residence_other_text == "KIHARU" ~ "Kiharu",
+                          current_sub_county_of_residence_other_text == "Gatanga  sub county" ~ "Gatanga",
+                          current_sub_county_of_residence_other_text == "THIKA" ~ "Thika Town",
+                          current_sub_county_of_residence_other_text == "Banda" ~ "Uganda",
+                          current_sub_county_of_residence_other_text == "MATHIOYA" ~ "Mathioya",
+                          current_sub_county_of_residence_other_text == "BUSIA UGANDA" ~ "Uganda",
+                          current_sub_county_of_residence_other_text == "BUSIA-UGUNDA" ~ "Uganda",
+                          current_sub_county_of_residence_other_text == "BUSIA -UGANDA" ~ "Uganda",
+                          current_sub_county_of_residence_other_text == "UGANDA" ~ "Uganda",
+                          current_sub_county_of_residence_other_text == "Muranga south" ~ "Murang'a South",
+                          current_sub_county_of_residence_other_text == "EMBU WEST" ~ "Manyatta",
+                          current_sub_county_of_residence_other_text == "Bungoma Township" ~ "Kanduyi",
+                          current_sub_county_of_residence_other_text == "MBAGALO" ~ "Tongaren",
+                          current_sub_county_of_residence_other_text == "BUNYALA" ~ "Bunyala",
+                          current_sub_county_of_residence_other_text == "SAMIA" ~ "Samia",
+                          current_sub_county_of_residence_other_text == "samia" ~ "Samia",
+                          current_sub_county_of_residence_other_text == "BUNYALA-RWAMBUA" ~ "Bunyala",
+                          current_sub_county_of_residence_other_text == "Budalangi" ~ "Bunyala", 
+                          current_sub_county_of_residence_other_text == "Bunyala-Bukani" ~ "Bunyala",
+                          current_sub_county_of_residence_other_text == "HAKATI" ~ "Samia", 
+                          current_sub_county_of_residence_other_text == "CHAPCHEROP" ~ "Marakwet West", 
+                          current_sub_county_of_residence_other_text == "CHUKA" ~ "Manyatta", 
+                          current_sub_county_of_residence_other_text == "SALAMA" ~ "Garissa",
+                          current_sub_county_of_residence_other_text == "Rongai" ~ "Kajiado North",
+                          TRUE ~ current_sub_county_of_residence)) 
+                
+                #Recode certain obs with incorrect values
+                rec_data3$res_county[rec_data3$recency_id == "REC1846300061"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1846300061"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1889600018"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1889600018"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1846300015"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1846300015"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1821900088"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1821900088"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1741100593"] <- "Machakos"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1741100593"] <- "Machakos"
+                rec_data3$res_county[rec_data3$recency_id == "REC1311300008"] <- "Homa Bay"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1311300008"] <- "Homa Bay"
+                rec_data3$res_county[rec_data3$recency_id == "REC1528800143"] <- "Kilifi"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1528800143"] <- "Kilifi"
+                rec_data3$res_county[rec_data3$recency_id == "REC1292900029"] <- "Kilifi"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1292900029"] <- "Kilifi"
+               rec_data3$res_county[rec_data3$recency_id == "REC1319300009"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1319300009"] <- "Kiambu"
+               rec_data3$res_county[rec_data3$recency_id == "REC1889600013"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1889600013"] <- "Kiambu"
+               rec_data3$res_county[rec_data3$recency_id == "REC1296300006"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1296300006"] <- "Kiambu"
+               rec_data3$res_county[rec_data3$recency_id == "REC1290400001"] <- "Bungoma"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290400001"] <- "Bungoma"
+               rec_data3$res_county[rec_data3$recency_id == "REC1290400002"] <- "Bungoma"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290400002"] <- "Bungoma"
+              rec_data3$res_county[rec_data3$recency_id == "REC1301600075"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1301600075"] <- "Kiambu"
+              rec_data3$res_county[rec_data3$recency_id == "REC1323000018"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1323000018"] <- "Kiambu"
+               rec_data3$res_county[rec_data3$recency_id == "REC1302800016"] <- "Nakuru"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1302800016"] <- "Nakuru"
+               rec_data3$res_county[rec_data3$recency_id == "REC1749400018"] <- "Makueni"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1749400018"] <- "Makueni"
+               rec_data3$res_county[rec_data3$recency_id == "REC1305100024"] <- "Machakos"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1305100024"] <- "Machakos"
+               rec_data3$res_county[rec_data3$recency_id == "REC1768300013"] <- "Machakos"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1768300013"] <- "Machakos"
+                rec_data3$res_county[rec_data3$recency_id == "REC1318000005"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1318000005"] <- "Kiambu" 
+                 rec_data3$res_county[rec_data3$recency_id == "REC1300100121"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1300100121"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1290500086"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290500086"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1768300012"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1768300012"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1292900005"] <- "Kajiado"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1292900005"] <- "Kajiado"
+                rec_data3$res_county[rec_data3$recency_id == "REC1320700039"] <- "Kajiado"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1320700039"] <- "Kajiado"
+                rec_data3$res_county[rec_data3$recency_id == "REC1290400097"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290400097"] <- "Kiambu" 
+                rec_data3$res_county[rec_data3$recency_id == "REC1290500096"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290500096"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1325800067"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1325800067"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1300100137"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1300100137"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1290500004"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290500004"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1319300041"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1319300041"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1290500132"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1290500132"] <- "Kiambu"
+                rec_data3$res_county[rec_data3$recency_id == "REC1299700015"] <- "Kiambu"
+                  rec_data3$current_county_of_residence[rec_data3$recency_id == "REC1299700015"] <- "Kiambu"
+                  
+               #Ugandan Clients
+               rec_data3$res_county[rec_data3$recency_id == "REC1609100074"] <- "Uganda" 
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400230"] <- "Uganda" 
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400255"] <- "Uganda"
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400304"] <- "Uganda"
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400225"] <- "Uganda"
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400250"] <- "Uganda"
+               rec_data3$res_county[rec_data3$recency_id == "REC1583400250"] <- "Uganda"    
+                  
+              #Recheck sub-county names
+              res_subcounty_names <- rec_data3 %>%
+                select(current_county_of_residence, 
+                     current_sub_county_of_residence, 
+                     current_sub_county_of_residence_other_text,
+                     res_sub_county) %>%
+                     unique()
+
+              rec_data1 <- rec_data3
+                
+ #Recode age into 5-year categories
+      rec_data1 <- rec_data1 %>% mutate(
+                age.recode = case_when((age_at_enrolment>=15 & age_at_enrolment <=19) ~ "15-19",
+                                       (age_at_enrolment>=20 & age_at_enrolment <= 24) ~ "20-24",
+                                       (age_at_enrolment>=25 & age_at_enrolment <=29) ~ "25-29",
+                                       age_at_enrolment>=30 & age_at_enrolment<=34 ~ "30-34",
+                                       age_at_enrolment>=35 & age_at_enrolment<=39 ~ "35-39",
+                                       age_at_enrolment>=40 & age_at_enrolment<=44 ~ "40-44",
+                                       age_at_enrolment>=45 & age_at_enrolment<=49 ~ "45-49",
+                                       age_at_enrolment>=50 & age_at_enrolment<=54 ~ "50-54",
+                                       age_at_enrolment>=55 & age_at_enrolment<=59 ~ "55-59",
+                                       age_at_enrolment>=60 ~ "60+"),
+                age.recode2 = case_when(age_at_enrolment>=15 & age_at_enrolment<=24 ~ "<25",
+                                        age_at_enrolment>=25 ~ "25+"),
+                age.recode3 = case_when(age_at_enrolment>=15 & age_at_enrolment <=19 ~ "15-19",
+                                        age_at_enrolment>=20 & age_at_enrolment <= 24 ~ "20-24",
+                                        age_at_enrolment>=25 ~ "25+"),
+                age.recode4 = case_when(age_at_enrolment>=15 & age_at_enrolment <=19 ~ "15-19",
+                                        age_at_enrolment>=20 & age_at_enrolment <= 24 ~ "20-24",
+                                        age_at_enrolment>=25 & age_at_enrolment <=29 ~ "25-29",
+                                        age_at_enrolment>=30 & age_at_enrolment<=34 ~ "30-34",
+                                        age_at_enrolment>=35 & age_at_enrolment<=39 ~ "35-39",
+                                        age_at_enrolment>=40 & age_at_enrolment<=44 ~ "40-44",
+                                        age_at_enrolment>=45 & age_at_enrolment<=49 ~ "45-49",
+                                        age_at_enrolment>=50  ~ "50+"),
+                age.recode5 = case_when(age_at_enrolment>=15 & age_at_enrolment <=24 ~ "15-24",
+                                        age_at_enrolment>=25 & age_at_enrolment <=29 ~ "25-29",
+                                        age_at_enrolment>=30 & age_at_enrolment<=49 ~ "30-49",
+                                        age_at_enrolment>=50  ~ "50+"),
+                age.ayp = case_when(age_at_enrolment <= 14 ~ "0-14",
+                                    (age_at_enrolment >=15 & age_at_enrolment <=30) ~ "15-30",
+                                    age_at_enrolment >=31 ~ "31+"),
+                age.ayp2 = case_when(age_at_enrolment >=15 & age_at_enrolment <=19 ~ "15-19",
+                                    age_at_enrolment >=20 & age_at_enrolment <=24 ~ "20-24",
+                                    age_at_enrolment >=25 & age_at_enrolment <=30 ~ "25-30"))
+      
+      rec_data1 <- rec_data1 %>% 
+        mutate(has_valid_rtri_result = case_when(final_rtri_result == "Negative" ~ 0,
+                                                 TRUE ~ as.numeric(has_valid_rtri_result)))
+```
+
+```{r Remove Duplicates}
+#Get Total # of new diagnoses between April 2021 and March 2023 (Total # of unique REC IDs) (N=36,727)
+ #Total number of obs. in dataset = 36,727
+  #Get list of entries with duplicate REC IDs (Total = 0)
+    duplicates <- rec_data1 %>%
+      janitor::get_dupes(recency_id)
+ 
+    #Remove all duplicate entries from dataset
+    rec_data0 <- rec_data1 %>%
+      filter(!recency_id %in% duplicates$recency_id)
+
+    #Remove true duplicates from duplicates dataset (those with incomplete information on age)
+    duplicates1 <- duplicates %>%
+      filter(!is.na(age_at_enrolment)) %>%
+      select(-c(dupe_count))
+  
+    #Add true obs back to primary dataset
+    rec_data1 <- bind_rows(rec_data0, duplicates1)
+    
+  write.csv(rec_data1, "data/rec_data1_clean.csv")
+```
+
+```{r Sample Flowchart}
+#Get # and % of all RS participants with by age group (all ages) (# of new diagnoses >=31 years = 20,895, # of persons without an age listed = 8, and # of persons under 15 yrs of age = 63)
+# (# of new diagnoses among 15-30 year olds = 13,648)
+  rec_by_allages <- rec_data1 %>%
+    tabyl(age.ayp, show_na = T) %>%
+    #select(-c(emptystring_)) %>%
+    adorn_totals(where = "both")
+
+#Get #s for analytic sample flowchart
+  # of AYP who were eligible (n=13,062)
+    ayp_elig <- rec_data1 %>%
+      filter(age.ayp == "15-30") %>%
+      tabyl(is_consent_requested)
+
+  # # of AYP who consented (n=12,104)
+  ayp_consent <- rec_data1 %>%
+    filter(age.ayp == "15-30") %>%
+    filter(is_consent_requested == 1) %>%
+    tabyl(consent_status)
+
+  # # of AYP with valid RTRI results (n=11,861)
+  ayp_valid_rtri <- rec_data1 %>%
+    filter(age.ayp == "15-30") %>%
+    filter(consent_status == "Client accepts to participate") %>%
+    tabyl(has_valid_rtri_result)
+  
+  # # of RTRI Recents and Longterms (Recents = 936 and Longterms = 10,896)
+   ayp_rtri <- rec_data1 %>%
+    filter(age.ayp == "15-30") %>%
+    filter(consent_status == "Client accepts to participate") %>%
+    filter(has_valid_rtri_result == 1) %>%
+    tabyl(final_rtri_result) 
+          
+  # # of valid RITA results among RTRI Recents (n=657)
+   ayp_valid_rita <- rec_data1 %>%
+    filter(age.ayp == "15-30") %>%
+    filter(consent_status == "Client accepts to participate") %>%
+    filter(has_valid_rtri_result == 1) %>%
+    filter(final_rtri_result == "Recent") %>%
+    tabyl(has_final_rita_result)
+   
+  # # of valid RITA results (Recents = 916 and Longterms = 10,797)
+   ayp_rita <- rec_data1 %>%
+    filter(age.ayp == "15-30") %>%
+    filter(consent_status == "Client accepts to participate") %>%
+    filter(has_valid_rtri_result == 1) %>%
+    filter(final_rtri_result == "Recent") %>%
+    filter(has_final_rita_result == 1) %>%
+    tabyl(final_rita_result)
+```
+
+```{r IAS 2023 Abstract - Table 1}
+#Filter data to only those <=30 years old and those without info on sex
+  rec_ayp <- rec_data1 %>% 
+          filter(age_at_enrolment <= 30 & age_at_enrolment>= 15) #%>% #N=8,465
+          #filter(sex != "Decline to answer" & sex != "Missing") 
+          #filter(final_rtri_result_is_invalid == 0) %>%
+          #filter(final_recency_result != "Negative" & final_recency_result != "NULL")
+
+    #Set all blanks to NA
+      rec_ayp[rec_ayp == ""] <- NA
+                   
+      #Number of sites reporting on AYP
+      sites <- rec_ayp %>%
+            select(facility_name) %>%
+            unique()
+      
+      counties <- rec_ayp %>%
+                  select(county) %>%
+                  unique()
+ 
+    #Only Valid Recency Results
+        valid_rec_ayp <- rec_ayp %>%
+          filter(final_recency_result == "Longterm" | final_recency_result == "Recent")
+          
+  write.csv(valid_rec_ayp, "data/ayp_clean.csv")
+  
+   #County Breakdown
+      #Percentage of RITA Recent by County
+         rec_by_county <- valid_rec_ayp %>%
+           tabyl(county, final_recency_result, show_na = F) %>%
+           #select(-c(emptystring_)) %>%
+           adorn_totals(where = "col") %>%            # add a total row
+           adorn_percentages(denominator = "row") %>%  # convert to proportions
+           adorn_pct_formatting(digits = 1)      %>%   # convert to percents
+           adorn_ns(position = "front")
+         
+         write.csv(rec_by_county, "data/AYP Recent & LT Infections by County.csv") 
+         
+         rec_by_subcounty <- valid_rec_ayp %>%
+           tabyl(sub_county, final_recency_result, show_na = F) %>%
+           #select(-c(emptystring_)) %>%
+           adorn_totals(where = "col") %>%            # add a total row
+           adorn_percentages(denominator = "row") %>%  # convert to proportions
+           adorn_pct_formatting(digits = 1)         # convert to percents
+      
+          # print(rec_by_county)
+          # 
+          # write.csv(rec_by_county, "C:/Users/qng9/OneDrive - CDC/Kenya DREAMS/Data/Outputs/AYP Recent & LT Infections by County.csv") 
+  
+      #Percentage of RITA Recent by Residential County
+         rec_by_res_county <- valid_rec_ayp %>%
+           tabyl(res_county, final_recency_result, show_na = F) %>%
+           #select(-c(emptystring_)) %>%
+           adorn_totals(where = "both") %>%            # add a total row
+           adorn_percentages(denominator = "row") %>%  # convert to proportions
+           adorn_pct_formatting(digits = 1) %>%        # convert to percents
+           adorn_ns(position = "front")
+
+         write.csv(rec_by_res_county, "data/AYP Recent & LT Infections by Residential County.csv") 
+         
+         
+        #Percentage of RITA Recent by Residential Sub-County
+          rec_by_subcounty <- valid_rec_ayp %>%
+               tabyl(res_sub_county, final_recency_result, show_na = F) %>%
+               #select(-c(emptystring_)) %>%
+               adorn_totals(where = "col") %>%            # add a total row
+               adorn_percentages(denominator = "row") %>%  # convert to proportions
+               adorn_pct_formatting(digits = 1)  %>%       # convert to percents
+               adorn_ns(position = "front")
+   #Age 
+      #Percentage of RITA Recent by Age Group with column %s
+         rec_by_age <- valid_rec_ayp %>%
+           tabyl(age.ayp2, final_recency_result, show_na = F) %>%
+           #select(-c(emptystring_)) %>%
+           adorn_totals(where = "col") %>%            # add a total row
+           adorn_percentages(denominator = "col") %>%  # convert to proportions
+           adorn_pct_formatting(digits = 1)  %>%       # convert to percents
+           adorn_ns(position = "front")
+           
+      #Get Median Age with IQR
+         summary(valid_rec_ayp$age_at_enrolment) 
+
+  #Sex
+        #Percentage of RITA Recent by Sex
+         rec_by_sex <- valid_rec_ayp %>%
+           filter(sex == "Female" | sex == "Male") %>%
+           tabyl(sex, final_recency_result, show_na = FALSE) %>%
+           #select(-c(emptystring_)) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)   %>%       # convert to percents
+            adorn_ns(position = "front")
+         
+                   #For AGYW Analysis - Among Females, 15-24 years old
+                   rec_agyw <- rec_ayp %>%
+                     filter(age.recode == "15-19" | age.recode == "20-24") %>%
+                     filter(sex == "Female")
+                   
+                     rec_by_agyw <- rec_agyw %>%
+                       tabyl(sex, final_recency_result, show_na = FALSE) %>%
+                       #select(-c(emptystring_)) %>%
+                        adorn_totals(where = "col") %>%            # add a total row
+                        adorn_percentages(denominator = "col") %>%  # convert to proportions
+                        adorn_pct_formatting(digits = 1)        # convert to percents
+                    
+                        #By Pregnancy Status
+                         rec_by_agyw_preg <- rec_agyw %>%
+                             filter(pregnancy_status == "Yes") %>%
+                             tabyl(pregnancy_status, final_recency_result, show_na = FALSE) %>%
+                             #select(-c(emptystring_)) %>%
+                              adorn_totals(where = "both") %>%            # add a total row
+                              adorn_percentages(denominator = "col") %>%  # convert to proportions
+                              adorn_pct_formatting(digits = 1)        # convert to percents
+                        
+                        #By Testing Point
+                         rec_by_agyw_htspoint <- rec_agyw %>%
+                             tabyl(modality, final_recency_result, show_na = FALSE) %>%
+                             #select(-c(emptystring_)) %>%
+                              adorn_totals(where = "both") %>%            # add a total row
+                              adorn_percentages(denominator = "col") %>%  # convert to proportions
+                              adorn_pct_formatting(digits = 1)        # convert to percents
+                         
+                         #By Facility   
+                          rec_by_agyw_site <- rec_agyw %>%
+                             tabyl(facility_name, final_recency_result, show_na = FALSE) %>%
+                             #select(-c(emptystring_)) %>%
+                              adorn_totals(where = "both") %>%            # add a total row
+                              adorn_percentages(denominator = "col") %>%  # convert to proportions
+                              adorn_pct_formatting(digits = 1)        # convert to percents
+                         
+                         #By Residential Sub-county 
+                         rec_by_agyw_res_subcounty <- rec_agyw %>%
+                             tabyl(current_sub_county_of_residence, final_recency_result, show_na = FALSE) %>%
+                             #select(-c(emptystring_)) %>%
+                              adorn_totals(where = "both") %>%            # add a total row
+                              adorn_percentages(denominator = "col") %>%  # convert to proportions
+                              adorn_pct_formatting(digits = 1)        # convert to percents
+                         
+#Pregnancy Status
+       #Percentage of RITA Recent by Sex
+         rec_by_preg <- valid_rec_ayp %>%
+           filter(pregnancy_status == "Yes" | pregnancy_status == "No" | pregnancy_status == "Unknown") %>%
+           tabyl(pregnancy_status, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)  %>%       # convert to percents
+            adorn_ns(position = "front")      
+         
+#Testing History
+        #Percentage of RITA Recent by Testing History
+         rec_by_testhist <- valid_rec_ayp %>%
+          tabyl(was_tested_hiv_before_encounter_, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)  %>%       # convert to percents
+            adorn_ns(position = "front") 
+         
+         names(rec_ayp)
+         
+#Time since last test
+         #Percentage of RITA Recent by Time since last test
+         rec_by_lasttest <- valid_rec_ayp %>% 
+           filter(last_tested_hiv_before_encounter != "Missing" & last_tested_hiv_before_encounter != "Refused to answer" &  last_tested_hiv_before_encounter != "Unknown") %>%
+          tabyl(last_tested_hiv_before_encounter, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)  %>%       # convert to percents
+            adorn_ns(position = "front")     
+         
+#PrEP Use
+         #Percentage of RITA Recent by Time since last test
+          rec_by_prep <- valid_rec_ayp %>% 
+           filter(taking_or_ever_taken_prep != "Missing" & taking_or_ever_taken_prep != "Refused to answer" &  taking_or_ever_taken_prep != "Unknown") %>%
+          tabyl(taking_or_ever_taken_prep, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)   %>%       # convert to percents
+            adorn_ns(position = "front")     
+          
+#Testing Modality
+  #First, recode OPD to Other PITC
+           valid_rec_ayp$modality[valid_rec_ayp$modality == "OPD" ] <- "Other PITC"
+   
+   rec_by_modality <- valid_rec_ayp %>%
+          tabyl(modality, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+            adorn_totals(where = "col") %>%            # add a total row
+            adorn_percentages(denominator = "col") %>%  # convert to proportions
+            adorn_pct_formatting(digits = 1)   %>%       # convert to percents
+            adorn_ns(position = "front")     
+  
+   prev_by_modality1 <- valid_rec_ayp %>%
+    tabyl(modality, final_recency_result, show_na = F) %>%
+    adorn_totals(where = "col")
+   
+      #Break down Other PITC
+            rec_by_otherpitc <- valid_rec_ayp %>%
+                filter(modality == "Other PITC") %>%
+                tabyl(initial_hts_testing_location, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+                  adorn_totals(where = "col") %>%            # add a total row
+                  adorn_percentages(denominator = "col") %>%  # convert to proportions
+                  adorn_pct_formatting(digits = 1)   %>%       # convert to percents
+                  adorn_ns(position = "front")     
+  
+#Identified through PNS            
+          rec_by_pns <- valid_rec_ayp %>%
+                tabyl(is_identified_through_pns, final_recency_result, show_na = FALSE, show_missing_levels = FALSE) %>%
+                  adorn_totals(where = "col") %>%            # add a total row
+                  adorn_percentages(denominator = "col") %>%  # convert to proportions
+                  adorn_pct_formatting(digits = 1)   %>%       # convert to percents
+                  adorn_ns(position = "front")     
+```
+
+```{r IAS 2023 Abstract - Table 2 - Recents}
+#Overall Percent RITA Recent
+    prev_by_all <- valid_rec_ayp %>%
+      freq_table(final_recency_result, percent_ci = 95, drop = TRUE)
+
+    # #Percent RITA recency among AGYW 
+    #   prev_by_agyw_all <- rec_agyw %>%
+    #       filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    #       freq_table(final_recency_result, percent_ci = 95, drop = TRUE)
+    # 
+    # #Percent RITA recency among AGYW in Kisumu (for PHR worksheet)
+    #   prev_by_agyw_kisumu <- rec_agyw %>%
+    #       filter(res_county == "Kisumu") %>%
+    #       filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    #       freq_table(final_recency_result, percent_ci = 95, drop = TRUE)
+    #   
+    #   #Percent RITA recency among pregnant AGYW in Kisumu (for PHR worksheet)
+    #   prev_by_agyw_kisumu_preg <- rec_agyw %>%
+    #       filter(res_county == "Kisumu") %>%
+    #       filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    #       filter(pregnancy_status == "Yes" | pregnancy_status == "No") %>%
+    #       freq_table(pregnancy_status, final_recency_result,  percent_ci = 95, drop = TRUE)
+    #   
+    #   #Percent RITA recency among AGYW by age in Kisumu (for PHR worksheet)
+    #   prev_by_agyw_kisumu_age <- rec_agyw %>%
+    #       filter(res_county == "Kisumu") %>%
+    #       filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    #       freq_table(age.recode, final_recency_result,  percent_ci = 95, drop = TRUE)
+    #   
+    #   #Percent RITA recency among AGYW by modality in Kisumu (for PHR worksheet)
+    #   prev_by_agyw_kisumu_mod <- rec_agyw %>%
+    #       filter(res_county == "Kisumu") %>%
+    #       filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    #       drop_na(modality) %>%
+    #       freq_table(modality, final_recency_result, percent_ci = 95, drop = TRUE) 
+
+#Ns, Percent RITA Recent, and Prevalence Ratio by Age Group
+    prev_by_age1 <- valid_rec_ayp %>%
+      tabyl(age.ayp2, final_recency_result, show_na = F) %>%
+      adorn_totals(where = "col")
+      
+    prev_by_age2 <- valid_rec_ayp %>%
+      filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+      freq_table(age.ayp2, final_recency_result, percent_ci = 95, drop = TRUE)
+    
+    #Feed in values from prev_by_age1 to create matrix for Risk Ratio
+    print(prev_by_age1)
+    agegroups <- c("15-19", "20-24", "25-30")
+    status <- c("Longterm", "Recent")
+    prev_ratio_age3 <- matrix(c(899, 49, 4115, 147, 6804, 181), 3, 2, byrow=TRUE)   
+    dimnames(prev_ratio_age3) <- list("Age Group" = agegroups, "Recency Status" = status)
+    riskratio(prev_ratio_age3, rev="rows")
+    
+#Ns, Percent RITA Recent, and Prevalence Ratio by Sex
+    prev_by_sex1 <- valid_rec_ayp %>%
+      filter(sex == "Female" | sex == "Male") %>%
+      tabyl(sex, final_recency_result, show_na = F) %>%
+      adorn_totals(where = "col")
+      
+    prev_by_sex2 <- valid_rec_ayp %>%
+      filter(sex == "Female" | sex == "Male") %>%
+      freq_table(sex, final_recency_result, percent_ci = 95, drop = TRUE)
+    
+    #Feed in values from prev_by_sex1 to create matrix for Risk Ratio
+    print(prev_by_sex1)
+    
+    sex <- c("Female", "Male")
+    status <- c("Longterm", "Recent")
+    prev_ratio_sex3 <- matrix(c(9416, 293, 2359, 83), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_sex3) <- list("Sex" = sex, "Recency Status" = status)
+    riskratio(prev_ratio_sex3, rev="rows")
+ 
+#Ns, Percent RITA Recent, and Prevalence Ratio by Pregnancy Status
+    prev_by_preg1 <- valid_rec_ayp %>%
+      filter(pregnancy_status == "Yes" | pregnancy_status == "No") %>%
+      tabyl(pregnancy_status, final_recency_result, show_na = F) %>%
+      adorn_totals(where = "col")
+      
+    prev_by_preg2 <- valid_rec_ayp %>%
+      filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+      filter(pregnancy_status == "Yes" | pregnancy_status == "No") %>%
+      freq_table(pregnancy_status, final_recency_result, percent_ci = 95, drop = TRUE)    
+    
+              #Ns, Percent RITA Recent, and Prevalence Ratio by pregnancy status and age group
+              prev_by_preg_age1 <- valid_rec_ayp %>%
+                  filter(pregnancy_status == "Yes" | pregnancy_status == "No") %>%
+                  tabyl(age.ayp2, final_recency_result, pregnancy_status, show_na = F) %>%
+                  adorn_totals(where = "col")
+              
+              print(prev_by_preg_age1)
+                    
+                  #Pregnant
+                  prev_by_preg_age2 <- valid_rec_ayp %>%
+                    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+                    filter(pregnancy_status == "Yes") %>%
+                    freq_table(age.ayp2, final_recency_result, percent_ci = 95, drop = TRUE)   
+    
+                  #Non-pregnant
+                  prev_by_preg_age3 <- valid_rec_ayp %>%
+                    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+                    filter(pregnancy_status == "No") %>%
+                    freq_table(age.ayp2, final_recency_result, percent_ci = 95, drop = TRUE)   
+    
+    #Feed in values from prev_by_preg1 to create matrix for Risk Ratio
+    print(prev_by_preg1)
+    
+    preg <- c("No", "Yes")
+    status <- c("Longterm", "Recent")
+    prev_ratio_preg3 <- matrix(c(5854, 204, 3360, 83), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_preg3) <- list("Pregnancy Status" = preg, "Recency Status" = status)
+    riskratio(prev_ratio_preg3, rev = "row")
+
+            #Pregnancy Status and Age, RRs
+            #Pregnant
+            print(prev_by_preg_age1) #Use 'Yes' Table
+            
+            preg_age <- c("15-19", "20-24", "25-30")
+            status <- c("Longterm", "Recent")
+            prev_ratio_preg_age2 <- matrix(c(290, 15, 1425, 34, 1645, 34), 3, 2, byrow=TRUE)   
+            dimnames(prev_ratio_preg_age2) <- list("Age Group" = preg_age, "Recency Status" = status)
+            riskratio(prev_ratio_preg_age2, rev = "row")
+    
+            #Non-Pregnant
+            print(prev_by_preg_age1) #Use 'No' Table
+            
+            preg_age <- c("15-19", "20-24", "25-30")
+            status <- c("Longterm", "Recent")
+            prev_ratio_preg_age3 <- matrix(c(439, 27, 2056, 82, 3359, 95), 3, 2, byrow=TRUE)   
+            dimnames(prev_ratio_preg_age3) <- list("Age Group" = preg_age, "Recency Status" = status)
+            riskratio(prev_ratio_preg_age3, rev = "row")
+    
+#Ns, Percent RITA Recent, and Prevalence Ratio by Testing History
+    prev_by_testhist1 <- valid_rec_ayp %>%
+      tabyl(was_tested_hiv_before_encounter_, final_recency_result, show_na = F) %>%
+      adorn_totals(where = "col")
+      
+    prev_by_testhist2 <- valid_rec_ayp %>%
+      filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+      filter(was_tested_hiv_before_encounter_ == 0 | was_tested_hiv_before_encounter_ ==1) %>%
+      freq_table(was_tested_hiv_before_encounter_, final_recency_result, percent_ci = 95, drop = TRUE)  
+    
+            #Feed in values from prev_by_testhist1 to create matrix for Risk Ratio
+            print(prev_by_testhist1)
+            
+            testhist <- c("No", "Yes")
+            status <- c("Longterm", "Recent")
+            prev_ratio_testhist3 <- matrix(c(2944, 97, 8868, 280), 2, 2, byrow=TRUE)   
+            dimnames(prev_ratio_testhist3) <- list("Ever tested before?" = testhist, "Recency Status" = status)
+            riskratio(prev_ratio_testhist3)
+    
+#Time since last test
+    #Ns, Percent RITA Recent, and Prevalence Ratio by Time since last test
+    prev_by_lasttest1 <- valid_rec_ayp %>%
+      filter(last_tested_hiv_before_encounter != "Missing" & last_tested_hiv_before_encounter != "Refused to answer" &  last_tested_hiv_before_encounter != "Unknown") %>%
+      tabyl(last_tested_hiv_before_encounter, final_recency_result, show_na = F) %>%
+      adorn_totals(where = "col")
+      
+    prev_by_lasttest2 <- valid_rec_ayp %>%
+      filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+      filter(last_tested_hiv_before_encounter != "Missing" & last_tested_hiv_before_encounter != "Refused to answer" &  last_tested_hiv_before_encounter != "Unknown") %>%
+      freq_table(last_tested_hiv_before_encounter, final_recency_result, percent_ci = 95, drop = TRUE)  
+         
+        #Combine categories for IAS Abstract Table
+           valid_rec_ayp <- valid_rec_ayp %>%
+              mutate(last_tested.recode = 
+                       case_when(last_tested_hiv_before_encounter == "Tested 13 – 24 months ago" | last_tested_hiv_before_encounter == "Tested more than 2 years ago" ~ "Tested more than 1 year ago",
+                                 TRUE ~ last_tested_hiv_before_encounter))
+           
+           table(valid_rec_ayp$last_tested.recode)
+      
+                #Ns, Percent RITA Recent, and Prevalence Ratio by Time since last test
+                  prev_by_lasttest.recode1 <- valid_rec_ayp %>%
+                    filter(last_tested.recode != "Missing" & last_tested.recode != "Refused to answer" &  last_tested.recode != "Unknown") %>%
+                    tabyl(last_tested.recode, final_recency_result, show_na = F) %>%
+                    adorn_totals(where = "col")
+                    
+                  prev_by_lasttest.recode2 <- valid_rec_ayp %>%
+                    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+                    filter(last_tested.recode != "Missing" & last_tested.recode != "Refused to answer" &  last_tested.recode != "Unknown") %>%
+                    freq_table(last_tested.recode, final_recency_result, percent_ci = 95, drop = TRUE) 
+  
+    #Feed in values from prev_by_lasttest1 to create matrix for Risk Ratio
+    print(prev_by_lasttest1)
+    
+    lasttest <- c("Tested <6 months ago","Tested 6-12 months ago", "Tested 13 – 24 months ago", "Tested more than 2 years ago")
+    status <- c("Longterm", "Recent")
+    prev_ratio_lasttest3 <- matrix(c(1790, 101, 3088, 86, 1934, 48, 2024, 45), 4, 2, byrow=TRUE)   
+    dimnames(prev_ratio_lasttest3) <- list("Time since last test" = lasttest, "Recency Status" = status)
+    riskratio(prev_ratio_lasttest3, rev = "rows")
+    
+                #Using recoded variables for IAS Abstract
+                  print(prev_by_lasttest.recode1)
+                  lasttest.recode <- c("Tested <6 months ago","Tested 6-12 months ago", "Tested more than 1 year ago")
+                  status <- c("Longterm", "Recent")
+                  prev_ratio_lasttest.recode3 <- matrix(c(1121, 54, 1820, 42, 2272, 34), 3, 2, byrow=TRUE)   
+                  dimnames(prev_ratio_lasttest.recode3) <- list("Time since last test" = lasttest.recode, "Recency Status" = status)
+                  riskratio(prev_ratio_lasttest.recode3, rev = "rows")
+    
+#Ns, Percent RITA Recent, and Prevalence Ratio by PrEP Use
+    prev_by_prep1 <- valid_rec_ayp %>%
+    filter(taking_or_ever_taken_prep != "Missing" & taking_or_ever_taken_prep != "Refused to answer" &  taking_or_ever_taken_prep != "Unknown") %>%
+    tabyl(taking_or_ever_taken_prep, final_recency_result, show_na = F) %>%
+    adorn_totals(where = "col")
+          
+    prev_by_prep2 <- valid_rec_ayp %>%
+    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    filter(taking_or_ever_taken_prep != "Missing" & taking_or_ever_taken_prep != "Refused to answer" &  taking_or_ever_taken_prep != "Unknown") %>%
+    freq_table(taking_or_ever_taken_prep, final_recency_result, percent_ci = 95, drop = TRUE)  
+    
+        #Combine categories for IAS Abstract Table
+           rec_ayp <- valid_rec_ayp %>%
+              mutate(taken_prep.recode = 
+                       case_when(taking_or_ever_taken_prep == "Yes, currently on PrEP" | taking_or_ever_taken_prep == "Yes, ever taken PrEP" ~ "Currently/Ever taken PrEP",
+                                 TRUE ~ taking_or_ever_taken_prep))
+           
+           table(rec_ayp$taken_prep.recode)
+    
+                  #Ns, Percent RITA Recent, and Prevalence Ratio by Ever/Currently taking PrEP
+                  prev_by_prep.recode1 <- rec_ayp %>%
+                    filter(taken_prep.recode != "Missing" & taken_prep.recode != "Refused to answer" &  taken_prep.recode != "Unknown") %>%
+                    tabyl(taken_prep.recode, final_recency_result, show_na = F) %>%
+                    adorn_totals(where = "col")
+                    
+                  prev_by_prep.recode2 <- rec_ayp %>%
+                    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+                    filter(taken_prep.recode != "Missing" & taken_prep.recode != "Refused to answer" &  taken_prep.recode != "Unknown") %>%
+                    freq_table(taken_prep.recode, final_recency_result, percent_ci = 95, drop = TRUE) 
+           
+    #Feed in values from prev_by_prep1 to create matrix for Risk Ratio
+    print(prev_by_prep1)
+    
+    prep <- c("No", "Yes, Currently on PrEP", "Yes, ever taken PrEP")
+    status <- c("Longterm", "Recent")
+    prev_ratio_prep3 <- matrix(c(11021, 352, 14, 0, 91, 5), 3, 2, byrow=TRUE)   
+    dimnames(prev_ratio_prep3) <- list("PrEP Use" = prep, "Recency Status" = status)
+    riskratio(prev_ratio_prep3, rev = "row")
+    
+                   #Feed in values from recoded variable
+                    print(prev_by_prep.recode1)
+                    prep.recode <- c("No", "Yes, Ever/Currently on PrEP")
+                    status <- c("Longterm", "Recent")
+                    prev_ratio_prep.recode3 <- matrix(c(11633, 368, 112, 7), 2, 2, byrow=TRUE)   
+                    dimnames(prev_ratio_prep.recode3) <- list("PrEP Use" = prep.recode, "Recency Status" = status)
+                    riskratio(prev_ratio_prep.recode3, rev = "row")
+        
+                    
+#Ns, Percent RITA Recent, and Prevalence Ratio by Testing Modality   
+    prev_by_modality1 <- valid_rec_ayp %>%
+    tabyl(modality, final_recency_result, show_na = F) %>%
+    adorn_totals(where = "col")
+          
+    prev_by_modality2 <- valid_rec_ayp %>%
+    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    drop_na(modality) %>%
+    freq_table(modality, final_recency_result, percent_ci = 95, drop = TRUE)  
+         
+        #Combine categories for IAS Abstract Table
+           valid_rec_ayp <- valid_rec_ayp %>%
+              mutate(modality.recode = 
+                       case_when(modality == "Emergency" | modality == "Inpatient" | modality == "SNS - Facility" | modality == "STI" | modality == "TB" | modality == "VMMC" | modality == "Mobile"  ~ "Other",
+                                 TRUE ~ modality))
+           
+           table(valid_rec_ayp$modality.recode)
+    
+                  #Ns, Percent RITA Recent, and Prevalence Ratio recoded modality variable
+                  prev_by_modality.recode1 <- valid_rec_ayp %>%
+                    tabyl(modality.recode, final_recency_result, show_na = F) %>%
+                    adorn_totals(where = "col")
+                    
+                  prev_by_modality.recode2 <- valid_rec_ayp %>%
+                    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+                    drop_na(modality) %>%
+                    freq_table(modality.recode, final_recency_result, percent_ci = 95, drop = TRUE) 
+                  
+          #Modality by Pregnancy Status
+          #Pregnant
+          prev_by_modal_preg_1 <- valid_rec_ayp %>%
+          filter (pregnancy_status == "Yes") %>%
+          tabyl(modality, final_recency_result, show_na = F) %>%
+          adorn_totals(where = "col")
+                
+          prev_by_modal_preg_2 <- valid_rec_ayp %>%
+          filter(pregnancy_status == "Yes") %>%
+          filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+          drop_na(modality) %>%
+          freq_table(modality, final_recency_result, percent_ci = 95, drop = TRUE)      
+                  
+          #Non-Pregnant
+          prev_by_modal_nonpreg_1 <- valid_rec_ayp %>%
+          filter (pregnancy_status == "No") %>%
+          tabyl(modality, final_recency_result, show_na = F) %>%
+          adorn_totals(where = "col")
+                
+          prev_by_modal_nonpreg_2 <- valid_rec_ayp %>%
+          filter(pregnancy_status == "No") %>%
+          filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+          drop_na(modality) %>%
+          freq_table(modality, final_recency_result, percent_ci = 95, drop = TRUE) 
+          
+    #Feed in values from prev_by_modality1 to create matrix for Risk Ratio
+    print(prev_by_modality1)
+    
+    modality <- c("Emergency", "Index", "Inpatient", "Mobile testing", "ANC1 (females only)", "Post-ANC1  (females only)", "SNS", "STI", "TB", "VMMC", "VCT", "Other PITC")
+    status <- c("Longterm", "Recent")
+    prev_ratio_modality3 <- matrix(c(30, 2, 2872, 74, 265, 5, 99, 4, 1839, 46, 1117, 31, 392, 13, 8, 1, 193, 8, 1, 0, 1503, 65, 2846, 105), 12, 2, byrow=TRUE)   
+    dimnames(prev_ratio_modality3) <- list("Modality" = modality, "Recency Status" = status)
+    riskratio(prev_ratio_modality3, rev="rows") 
+    
+                #Feed in values from recoded variable to create matrix for Risk Ratio
+                print(prev_by_modality.recode1)
+                
+                modality.recode <- c("Index", "Other PITC", "Post-ANC1  (females only)", "ANC1 (females only)", "VCT", "Other")
+                status <- c("Longterm", "Recent")
+                prev_ratio_modality.recode3 <- matrix(c(3027, 77, 3040, 112, 1151, 32, 1959, 49, 1568, 68, 1040, 35), 6, 2, byrow=TRUE)   
+                dimnames(prev_ratio_modality.recode3) <- list("Modality" = modality.recode, "Recency Status" = status)
+                riskratio(prev_ratio_modality.recode3, rev="rows") 
+
+#Ns, Percent RITA Recent, and Prevalence Ratio by PNS Referral
+    prev_by_pns1 <- valid_rec_ayp %>%
+    tabyl(is_identified_through_pns, final_recency_result, show_na = F) %>%
+    adorn_totals(where = "col")
+          
+    prev_by_pns2 <- valid_rec_ayp %>%
+    filter(final_recency_result == "Longterm" | final_recency_result == "Recent") %>%
+    freq_table(is_identified_through_pns, final_recency_result, percent_ci = 95, drop = TRUE)    
+    
+    #Feed in values from prev_by_pns1 to create matrix for Risk Ratio
+    print(prev_by_pns1)
+    
+    pns <- c("No","Yes")
+    status <- c("Longterm", "Recent")
+    prev_ratio_pns3 <- matrix(c(9118, 311, 2700, 66), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_pns3) <- list("Identified through PNS" = pns, "Recency Status" = status)
+    riskratio(prev_ratio_pns3)
+```
+
+```{r Prevalence Ratios Graphic - code is from Sasi}
+library(readxl)
+
+df <- read.xlsx("data/Table_test.xlsx", sheetName = "Sheet1")
+
+level_order <- c('Age', 'Sex', 'Pregnancy status', 'Pregnant by Age Group', 'Non-pregnant by Age Group', 'Testing history', 'Time since last test', 'PrEP Use', 'Testing modality', 'Identified through PNS')
+
+prev_ratios <- df %>% 
+  #filter(Group=="Total") 
+  mutate(
+  Characteristics = fct_relevel(Characteristics, "Age", "Sex", "Pregnancy status", "Pregnant by Age Group", "Non-pregnant by Age Group", "Testing history", "Time since last test", 'PrEP Use', "Testing modality", "Identified through PNS"),
+  strata = fct_reorder(strata, cPR)
+) %>%
+  ggplot(aes(x = factor(strata), y = cPR, group = factor(Characteristics, levels = level_order))) +
+  geom_point(aes(colour = factor(Characteristics, levels = level_order)), position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(colour = factor(Characteristics, levels = level_order), ymin = lcl, ymax = ucl), position = position_dodge(width = 0.5)) +
+  geom_hline(yintercept = 1) +
+  scale_y_continuous(expand = c(0, 0), limit = c(0,5,1)) +
+  coord_flip() +
+  facet_grid(rows = vars(Characteristics), scales = "free_y", switch = "y", space = "free_y") +
+  theme(
+    plot.margin = margin(0.5, 0.5, 0.5, 0.5, unit = "cm"),
+    plot.title = element_text(size = 15, face = "bold", hjust = 0),
+    strip.text.y = element_text(size = 15),
+    strip.placement = "outside",
+    axis.title.x = element_text(margin = margin(t = 0.5, b = 0.5, unit = "cm"), size = 15),
+    axis.title.y = element_blank(),
+    axis.text = element_text(size = 15),
+    legend.position = "none",
+    panel.grid.major.y = element_blank(),
+    strip.text.y.left = element_text(angle = 0),
+  ) + labs(y = "Crude Prevalence Ratio")
+
+print(prev_ratios)
+
+ggsave(prev_ratios, filename = paste0(export.folder, "AYP Prevalence Ratios Graph_", Sys.Date,".png"), width = 30, height=20, units="cm")
+```
+
+```{r IAS 2023 Abstract - Table 2 - Longterms (Risk Ratios only)}
+#Prevalence Ratio by Age Group
+  status_lt <- c("Recent", "Longterm") #set status for all RR tables
+
+    #Feed in values from prev_by_age1 to create matrix for Risk Ratio
+    print(prev_by_age1)
+    agegroups <- c("15-19", "20-24", "25-30")
+    prev_ratio_age4 <- matrix(c(46, 842, 138, 3910, 174, 6443), 3, 2, byrow=TRUE)   
+    dimnames(prev_ratio_age4) <- list("Age Group" = agegroups, "Recency Status" = status_lt)
+    riskratio(prev_ratio_age4, rev="rows")
+    
+#Prevalence Ratio by Sex
+    #Feed in values from prev_by_sex1 to create matrix for Risk Ratio
+    print(prev_by_sex1)
+    
+    sex <- c("Female", "Male")
+    prev_ratio_sex4 <- matrix(c(279, 8908, 78, 2252), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_sex4) <- list("Sex" = sex, "Recency Status" = status_lt)
+    riskratio(prev_ratio_sex4, rev="rows")
+ 
+#Prevalence Ratio by Pregnancy Status
+    #Feed in values from prev_by_preg1 to create matrix for Risk Ratio
+    print(prev_by_preg1)
+    
+    preg <- c("No", "Yes")
+    prev_ratio_preg4 <- matrix(c(196, 5522, 79, 3185), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_preg4) <- list("Pregnancy Status" = preg, "Recency Status" = status_lt)
+    riskratio(prev_ratio_preg4, rev = "row")
+    
+      #Prevalence Ratios by pregnancy status and age group
+            #Pregnant
+            print(prev_by_preg_age1) #Use 'Yes' Table
+            
+            preg_age <- c("15-19", "20-24", "25-30")
+            prev_ratio_preg_age4 <- matrix(c(14, 271, 33, 1355, 32, 1559), 3, 2, byrow=TRUE)   
+            dimnames(prev_ratio_preg_age4) <- list("Age Group" = preg_age, "Recency Status" = status_lt)
+            riskratio(prev_ratio_preg_age4, rev = "row")
+    
+            #Non-Pregnant
+            print(prev_by_preg_age1) #Use 'No' Table
+            
+            preg_age <- c("15-19", "20-24", "25-30")
+            prev_ratio_preg_age5 <- matrix(c(26, 411, 75, 1947, 95, 3164), 3, 2, byrow=TRUE)   
+            dimnames(prev_ratio_preg_age5) <- list("Age Group" = preg_age, "Recency Status" = status_lt)
+            riskratio(prev_ratio_preg_age5, rev = "row")
+    
+#Prevalence Ratios by Testing History
+    #Feed in values from prev_by_testhist1 to create matrix for Risk Ratio
+    print(prev_by_testhist1)
+    
+    testhist <- c("No", "Yes")
+    prev_ratio_testhist4 <- matrix(c(94, 2771, 264, 8418), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_testhist4) <- list("Ever tested before?" = testhist, "Recency Status" = status_lt)
+    riskratio(prev_ratio_testhist4)
+    
+#Prevalence Ratios by Time since last test
+    #Feed in values from prev_by_lasttest1 to create matrix for Risk Ratio
+    print(prev_by_lasttest1)
+    
+    lasttest <- c("Tested <6 months ago","Tested 6-12 months ago", "Tested 13 – 24 months ago", "Tested more than 2 years ago")
+    prev_ratio_lasttest4 <- matrix(c(95, 1704, 79, 2939, 45, 1817, 44, 1927), 4, 2, byrow=TRUE)   
+    dimnames(prev_ratio_lasttest4) <- list("Time since last test" = lasttest, "Recency Status" = status_lt)
+    riskratio(prev_ratio_lasttest4, rev = "rows")
+    
+          #Using recoded variables for IAS Abstract
+            print(prev_by_lasttest.recode1)
+            
+            lasttest.recode <- c("Tested <6 months ago","Tested 6-12 months ago", "Tested more than 1 year ago")
+            prev_ratio_lasttest.recode4 <- matrix(c(1121, 54, 1820, 42, 2272, 34), 3, 2, byrow=TRUE)   
+            dimnames(prev_ratio_lasttest.recode4) <- list("Time since last test" = lasttest.recode, "Recency Status" = status_lt)
+            riskratio(prev_ratio_lasttest.recode4, rev = "rows")
+    
+#Prevalence Ratios by PrEP Use
+  #Prevalence Ratio by Ever/Currently taking PrEP
+    #Feed in values from prev_by_prep1 to create matrix for Risk Ratio
+    print(prev_by_prep1)
+    
+    prep <- c("No", "Yes, Currently on PrEP", "Yes, ever taken PrEP")
+    prev_ratio_prep4 <- matrix(c(352, 11021, 0, 14, 5, 91), 3, 2, byrow=TRUE)   
+    dimnames(prev_ratio_prep4) <- list("PrEP Use" = prep, "Recency Status" = status_lt)
+    riskratio(prev_ratio_prep4, rev = "row")
+    
+         #Feed in values from recoded variable
+          print(prev_by_prep.recode1)
+          
+          prep.recode <- c("Yes, Ever/Currently on PrEP","No")
+          prev_ratio_prep.recode3 <- matrix(c(1, 62, 166, 6775), 2, 2, byrow=TRUE)   
+          dimnames(prev_ratio_prep.recode3) <- list("PrEP Use" = prep.recode, "Recency Status" = status_lt)
+          riskratio(prev_ratio_prep.recode3, rev = "row")
+                    
+#Prevalence Ratios by Testing Modality
+    #Feed in values from prev_by_modality1 to create matrix for Risk Ratio
+    print(prev_by_modality1)
+    
+    modality <- c("Emergency", "Index", "Inpatient", "Mobile testing", "ANC1 (females only)", "Post-ANC1  (females only)", "SNS", "STI", "TB", "VMMC", "VCT", "Other PITC")
+    prev_ratio_modality4 <- matrix(c(2, 30, 74, 2872, 5, 265, 4, 99, 46, 1839, 31, 1117, 13, 392, 1, 8, 8, 193, 0, 1, 65, 1503, 105, 2846), 12, 2, byrow=TRUE)   
+    dimnames(prev_ratio_modality4) <- list("Modality" = modality, "Recency Status" = status_lt)
+    riskratio(prev_ratio_modality4, rev="rows") 
+    
+                #Feed in values from recoded variable to create matrix for Risk Ratio
+                print(prev_by_modality.recode1)
+                
+                modality.recode <- c("Index", "Other PITC", "Post-ANC1  (females only)", "ANC1 (females only)", "VCT", "Other")
+                prev_ratio_modality.recode4 <- matrix(c(41, 1771, 53, 1814, 13, 758, 11, 982, 36, 982, 12, 563), 6, 2, byrow=TRUE)   
+                dimnames(prev_ratio_modality.recode4) <- list("Modality" = modality.recode, "Recency Status" = status_lt)
+                riskratio(prev_ratio_modality.recode4, rev="rows") 
+
+#Prevalence Ratio by PNS Referral
+    #Feed in values from prev_by_pns1 to create matrix for Risk Ratio (use chi.square p-value)
+    print(prev_by_pns1)
+    
+    pns <- c("No","Yes")
+    prev_ratio_pns4 <- matrix(c(295, 8637, 63, 2558), 2, 2, byrow=TRUE)   
+    dimnames(prev_ratio_pns4) <- list("Identified through PNS" = pns, "Recency Status" = status_lt)
+    riskratio(prev_ratio_pns4)
+```
+
+```{r create files for QGIS maps}
+#% RITA Recent by Sub-County
+    rec_by_subcounty <- valid_rec_ayp %>%
+       tabyl(res_sub_county, final_recency_result, show_na = F) %>%
+       #select(-c(emptystring_)) %>%
+       adorn_totals(where = "col") %>%
+       group_by(res_sub_county) %>% 
+       summarise(n = n()) %>%   
+       mutate(final_rita_result_is_recent_1 = factor(final_rita_result_is_recent_1), 
+              percent = formattable::percent (n/sum(n))) %>% 
+       mutate(label = ifelse(final_rita_result_is_recent_1==1, percent, NA),                                                                  label = formattable::percent(label)) %>% as.data.frame() %>% mutate(n = as.numeric(n)) %>% mutate(final_rita_result_is_recent_2 = case_when(final_rita_result_is_recent_1==0 ~ "Longterm",                                                                                                                                        final_rita_result_is_recent_1==1 ~ "Recent"))
+```
+
+```{r Incidence Using HTS_NEG}
+#Create file for using in SatScan
+  ##Aggregate your site + period RITA results
+    RITA_by_site_period <- valid_rec_ayp %>%
+      select(c(facility_name, county, sub_county, mfl_code, final_recency_result, USG_Period)) %>%
+      group_by_all() %>% 
+      summarise(Total = n()) %>%
+      ungroup()
+
+         # Pivot Wide
+            full_df_wide <- RITA_by_site_period %>% 
+              unite("New_Name", USG_Period, final_recency_result) %>% # Select Period column of interest
+               pivot_wider(names_from = New_Name, values_from = Total) %>%
+              mutate_if(is.numeric, ~replace(., is.na(.), 0))
+            
+            full_df_wide
+
+  ##Bring in MSD file
+    msd <- read.csv("C:/Users/qng9.CDC/OneDrive - CDC/Kenya Recency Coding/Inputs/HTS_NEG for FY21-22 and FY23Q1-Q2_pulled on 5.23.2023.csv")
+    
+     msd2 <- msd %>% # Select MSD
+        filter(ageasentered %in% c("15-19", "20-24", "25-29")) %>%
+        filter(fiscal_year %in% c("2021", "2022", "2023")) %>%
+        filter(indicator %in% c("HTS_TST_NEG")) %>% 
+        filter(sitename != "Data reported above Site level") %>%
+        select(orgunituid, sitename, psnu, indicator, fiscal_year, qtr1, qtr2, qtr3, qtr4) %>%
+        pivot_longer(qtr1:qtr4, names_to = "label", values_to = "value") %>%
+        unite("USG_Period", fiscal_year, label) #Pivot wide here to have separate columns for each indicator, and then pivot again in a later step to get unique values for each indicator
+    
+      msd2 <- msd2 %>%
+        group_by_if(is.character) %>%
+        summarize(HTS_NEG=sum(value, na.rm=TRUE)) %>%
+        ungroup() %>%
+        arrange(orgunituid, sitename, USG_Period)
+
+      #Pivot Wide
+        msd3 <- msd2 %>% unite("New_Name", USG_Period, indicator) %>% # Select Period column of interest
+          pivot_wider(names_from = New_Name, values_from = HTS_NEG)
+
+##Merge Recency data to MSD
+    full_df_wide2 <- full_df_wide %>%
+      left_join(msd3, by = c("facility_name"="sitename")) %>%
+        mutate(merged=!is.na(orgunituid)) #Creates merge indicator variable to determine which sites were joined/not joined
+    
+      count(full_df_wide2, merged) #302 sites were not merged
+      
+    unmatched_ayp_sites <- full_df_wide2 %>% filter(merged == "FALSE") %>% select(facility_name, county, sub_county)
+      
+  write.csv(unmatched_ayp_sites, "C:/Users/qng9/OneDrive - CDC/Kenya Recency Coding/Outputs/unmatched_ayp_sites.csv")
+  
+#clean site names
+  msd3 <- msd3 %>%
+      mutate(sitename = str_replace_all(sitename, "Center", "Centre")) %>%
+      mutate(sitename = str_replace_all(sitename, "Kisumu East", "Kisumu"))
+      
+ 
+```
+
+```{r Viremia Data from KENPHIA}
+viremia <- read.csv("C:/Users/qng9.CDC/OneDrive - CDC/KENPHIA/KENPHIA 2018/KENPHIA Final Report Package update 20201104a/KENPHIA2018FINBIO_20201104.csv")
+
+#Create new 'Total' Variable and recode 'Gender' variable
+viremia <- viremia %>% 
+    #mutate(all = case_when(Year==2021 & Month<10 ~ "FY21")) %>%
+    mutate(gender = 
+                  recode(gender,
+                         "1" = "Male",
+                         "2" = "Female"))
+viremia1 <- viremia %>%
+    filter(hivstatusfinal == 1 | hivstatusfinal == 2) %>%
+    filter(age >= 15)
+
+
+
+```
+
+```{mapping}
+# install.packages("tmap")
+# install.packages("tmaptools")
+# install.packages("sf")
+# install.packages("leaflet")
+# library(tmap)
+# library("tmaptools")
+# library("sf")
+# library("leaflet")
+
+
+# Pull in shapefile
+#'C:/Users/qng9/OneDrive - CDC/QGIS/Kenya Recency/ken_adm_iebc_20191031_shp'
+
+
+
+```
