@@ -520,6 +520,10 @@ model_data$pregnant <- relevel(factor(model_data$pregnant), ref = "Not pregnant"
 model_data$testing_history <- relevel(factor(model_data$testing_history), ref = "Never tested")
 model_data$since_last_test <- relevel(factor(model_data$since_last_test), ref = "Never tested")
 
+
+male_data <- model_data |> filter(sex == "Male")
+female_data <- model_data |> filter(sex == "Female")
+
 ```
 
 
@@ -577,11 +581,23 @@ summary(fit)
 library(broom)
 
 # Fit the log-binomial model
-log_binom_model <- glm(recency_result ~ age_group + sex + pregnant + testing_history +
+log_binom_model <- glm(recency_result ~ age_group + pregnant + testing_history +
              since_last_test + prep_use, 
              family = binomial(link = "log"), 
              data = model_data)
 
+
+# Fit the log-binomial model
+log_binom_model_female <- glm(recency_result ~ age_group + pregnant + testing_history +
+             since_last_test + prep_use, 
+             family = binomial(link = "log"), 
+             data = female_data)
+
+# Fit the log-binomial model
+log_binom_model_male <- glm(recency_result ~ age_group + testing_history +
+             since_last_test + prep_use, 
+             family = binomial(link = "log"), 
+             data = male_data)
 
 ```
 
@@ -631,19 +647,155 @@ results_log_binom
 
 
 
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(gt)
+
+
+# Create the gt table
+results_table <- results_log_binom %>%
+  gt() %>%
+  tab_header(
+    title = "Log-Binomial Model Results",
+    subtitle = "Risk Ratios and 95% Confidence Intervals"
+  ) %>%
+  fmt_number(
+    columns = vars(Risk_Ratio, CI_Lower, CI_Upper),
+    decimals = 3
+  ) %>%
+  cols_label(
+    Predictor = "Predictor",
+    Risk_Ratio = "Risk Ratio",
+    CI_Lower = "CI Lower",
+    CI_Upper = "CI Upper"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  tab_spanner(
+    label = "95% Confidence Interval",
+    columns = vars(CI_Lower, CI_Upper)
+  ) %>%
+  opt_table_outline() %>%
+  opt_row_striping() %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+# Display the table
+print(results_table)
+
+```
 
 
 
 
+```{r}
+
+# Generate GT table
+table_three <- results_log_binom %>%
+  mutate(Variable = case_match(Predictor,
+                              "age_group15-19" ~ "Age",
+                              "age_group20-24" ~ "Age",
+                              "sexMale" ~ "Gender",
+                              "pregnantN/A" ~ "Pregnancy status",
+                              "pregnantPregnant" ~ "Pregnancy status",
+                              "testing_historyEver tested" ~ "Testing History",
+                              "since_last_test<6 months" ~ "Time since last test",
+                              "since_last_test6-12 months" ~ "Time since last test",
+                              "since_last_test13-24 months" ~ "Time since last test",
+                              "since_last_test>2 years" ~ "Time since last test",
+                              "prep_useNever" ~ "PrEP Use",
+                              .default = Predictor)) |>
+  mutate(Characteristic = case_match(Predictor,
+                              "age_group15-19" ~ "15-19",
+                              "age_group20-24" ~ "20-24",
+                              "sexMale" ~ "Male",
+                              "pregnantN/A" ~ "N/A",
+                              "pregnantPregnant" ~ "Pregnant",
+                              "testing_historyEver tested" ~ "Ever tested",
+                              "since_last_test<6 months" ~ "<6 months",
+                              "since_last_test6-12 months" ~ "6-12 months",
+                              "since_last_test13-24 months" ~ "13-24 months",
+                              "since_last_test>2 years" ~ "2 years",
+                              "prep_useNever" ~ "Never",
+                              .default = Predictor))|>
+  mutate(`Risk Ratio (95% CI)` = paste(round(Risk_Ratio, 2), "(", round(CI_Lower,2), " - ", round(CI_Upper,2), ")")) |>
+  filter(Predictor != "pregnantN/A") |>
+  select(Variable, Characteristic,`Risk Ratio (95% CI)`) |>
+  gt(
+    groupname_col = "Variable"
+  )|>
+  tab_header(
+    title = "Log-Binomial Model Results",
+    subtitle = "Adjusted Risk Ratios and 95% Confidence Intervals"
+  )|>
+  tab_style(
+    style = list(cell_borders(sides = "all", color = "gray", weight = px(1)),
+                 cell_text(color = "black")),
+    locations = cells_body()
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_labels(everything())
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", color = "black"),
+      cell_fill(color = "#FFFDD0")
+    ),
+    locations = cells_column_spanners()
+  ) %>%
+  opt_table_font(
+    font = list(
+      google_font(name = "Roboto Condensed")
+    )
+  ) %>%
+  tab_options(data_row.padding = px(1))
+
+gtsave(table_three, "output/table_3.png")
+
+table_three
+
+```
 
 
 
 
+```{r}
+# Save the gt table as HTML
+gtsave(table_three, "table_3.html")
+gtsave(table_three, "output/table_3.html")
+
+# Open the HTML file and copy the table
+browseURL("output/table_3.html")
+```
 
 
 
 
+```{r}
+
+# Extract risk ratios (exponentiated coefficients)
+risk_ratios_female <- exp(coef(log_binom_model_female)) |> as.data.frame()
+
+# Display risk ratios
+print(risk_ratios_female)
+```
 
 
 
+```{r}
 
+# Extract risk ratios (exponentiated coefficients)
+risk_ratios_male <- exp(coef(log_binom_model_male)) |> as.data.frame()
+
+# Display risk ratios
+print(risk_ratios_male)
+```
