@@ -130,13 +130,13 @@ clean_data <- clean_data %>%
   mutate(
     age =  sjlabelled::set_label(age, "Age at Enrollment"),
     age_group = sjlabelled::set_label(age_group, "Age Group"),
-    sex = sjlabelled::set_label(sex, "Gender"),
+    sex = sjlabelled::set_label(sex, "Sex"),
     pregnant = sjlabelled::set_label(pregnant, "Pregnancy status"),
     testing_history = sjlabelled::set_label(testing_history, "Testing History"),
     since_last_test = sjlabelled::set_label(since_last_test, "Time since last test"),
     prep_use = sjlabelled::set_label(prep_use, "PrEP use"),
     modality = sjlabelled::set_label(modality, "Testing modality"),
-    other_pitc = sjlabelled::set_label(other_pitc, "Breakdown of other PITC"),
+    other_pitc = sjlabelled::set_label(other_pitc, "Other PITC"),
     pns_identified = sjlabelled::set_label(pns_identified, "Identified throgh PNS"),
     recency_result = sjlabelled::set_label(recency_result, "Recency result")
   ) 
@@ -145,18 +145,20 @@ clean_data <- clean_data %>%
 
 ```
 
-The table reveals statistically significant differences between long-term and recent groups in terms of age distribution, time since the last test and PrEP use, while gender, pregnancy status, and testing history do not show significant differences.
+The table reveals statistically significant differences between long-term and recent groups in terms of age distribution, time since the last test and PrEP use, while sex, pregnancy status, and testing history do not show significant differences.
 
 ```{r}
 #| fig-width: 10
 
 # Generate GT table
 table_one <- clean_data %>%
-  select(age_group, sex, pregnant, testing_history, since_last_test, prep_use, recency_result) %>%
+  select(age, age_group, sex, pregnant, testing_history, since_last_test, prep_use, 
+         modality, other_pitc, pns_identified, 
+         recency_result) %>%
   tbl_summary(
     by = recency_result,
     statistic = list(all_continuous() ~ "{median} ({sd})", all_categorical() ~ "{n} ({p}%)"),
-    digits = all_continuous() ~ 2,
+    digits = all_continuous() ~ 1,
     missing = "no"
   ) %>%
   add_overall() %>%
@@ -344,7 +346,6 @@ combined_results <- bind_rows(
 
 ```
 
-
 ```{r}
 #| fig-width: 10
 
@@ -353,7 +354,7 @@ table_two <- combined_results %>%
   select(row_var : cpr) %>%
   mutate(row_var = case_match(row_var,
                               "age_group" ~ "Age",
-                              "sex" ~ "Gender",
+                              "sex" ~ "Sex",
                               "pregant" ~ "Pregnancy Status",
                               "testing_history" ~ "Testing History",
                               "since_last_test" ~ "Time since last test",
@@ -411,10 +412,6 @@ browseURL("output/table_2.html")
 
 ```
 
-
-
-
-
 ```{r}
 df <- combined_results |>
   transmute(Characteristics = case_match(row_var,
@@ -471,24 +468,6 @@ ggsave(prev_ratios,
        width = 20, height = 20, units = "cm")
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Modelling
 
 ```{r}
@@ -526,8 +505,8 @@ female_data <- model_data |> filter(sex == "Female")
 
 ```
 
-
 # Adjusted Risk Ratios
+
 # Using Robust Poisson Regression
 
 ```{r}
@@ -574,8 +553,8 @@ result
 summary(fit) 
 ```
 
-
 ## Log-Binomial Model
+
 ```{r}
 # Load necessary library
 library(broom)
@@ -601,7 +580,6 @@ log_binom_model_male <- glm(recency_result ~ age_group + testing_history +
 
 ```
 
-
 ```{r}
 
 # Summarize the model to view coefficients
@@ -617,8 +595,6 @@ risk_ratios <- exp(coef(log_binom_model)) |> as.data.frame()
 # Display risk ratios
 print(risk_ratios)
 ```
-
-
 
 ```{r}
 # Extract risk ratios (exponentiated coefficients)
@@ -644,8 +620,6 @@ results_log_binom <- data.frame(
 
 results_log_binom
 ```
-
-
 
 ```{r}
 # Load necessary libraries
@@ -690,9 +664,6 @@ print(results_table)
 
 ```
 
-
-
-
 ```{r}
 
 # Generate GT table
@@ -700,7 +671,7 @@ table_three <- results_log_binom %>%
   mutate(Variable = case_match(Predictor,
                               "age_group15-19" ~ "Age",
                               "age_group20-24" ~ "Age",
-                              "sexMale" ~ "Gender",
+                              "sexMale" ~ "Sex",
                               "pregnantN/A" ~ "Pregnancy status",
                               "pregnantPregnant" ~ "Pregnancy status",
                               "testing_historyEver tested" ~ "Testing History",
@@ -765,9 +736,6 @@ table_three
 
 ```
 
-
-
-
 ```{r}
 # Save the gt table as HTML
 gtsave(table_three, "table_3.html")
@@ -777,9 +745,6 @@ gtsave(table_three, "output/table_3.html")
 browseURL("output/table_3.html")
 ```
 
-
-
-
 ```{r}
 
 # Extract risk ratios (exponentiated coefficients)
@@ -788,8 +753,6 @@ risk_ratios_female <- exp(coef(log_binom_model_female)) |> as.data.frame()
 # Display risk ratios
 print(risk_ratios_female)
 ```
-
-
 
 ```{r}
 
