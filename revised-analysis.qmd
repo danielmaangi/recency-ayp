@@ -42,7 +42,7 @@ data <- read.csv("data/fact_recency_case.csv") |>
          enroll_year = lubridate::year(enrollement_date),
          enroll_month = lubridate::month(enrollement_date, label = TRUE),
          enroll_quarter = lubridate::quarter(enrollement_date)) |>
-  filter(enrollement_date  >= "2021-04-01" & enrollement_date <= "2024-03-31") # up to March 31st 2024?
+  filter(enrollement_date  >= "2021-04-01" & enrollement_date <= "2024-06-30") # up to March 31st 2024?
 ```
 
 ```{r}
@@ -159,7 +159,8 @@ table_one <- clean_data %>%
     by = recency_result,
     statistic = list(all_continuous() ~ "{median} ({sd})", all_categorical() ~ "{n} ({p}%)"),
     digits = all_continuous() ~ 1,
-    missing = "no"
+    missing = "no",
+    type = list(pns_identified ~ "categorical")
   ) %>%
   add_overall() %>%
   add_p() %>%
@@ -190,9 +191,11 @@ table_one <- clean_data %>%
       google_font(name = "Roboto Condensed")
     )
   ) |>
-  tab_options(data_row.padding = px(0.5))
+  tab_options(data_row.padding = px(0.5),
+              table.font.size = px(26),
+              table.width = pct(70))
 
-gtsave(table_one, "output/table_1.png")
+gtsave(table_one_a, "output/table_1a.png")
 
 table_one
 ```
@@ -203,9 +206,11 @@ gtsave(table_one, "table_1.html")
 gtsave(table_one, "output/table_1.html")
 
 # Open the HTML file and copy the table
-browseURL("output/table_1.html")
+#browseURL("output/table_1a.html")
 
 ```
+
+
 
 ## Summarize by indicator
 
@@ -288,7 +293,10 @@ process_data <- function(clean_data, variable_name) {
     freq_table(!!sym(variable_name), recency_result, percent_ci = 95, drop = TRUE) %>%
     select(row_cat, col_cat, n) %>%
     pivot_wider(names_from = col_cat, values_from = n) %>%
-    rename(variable_group = row_cat)
+    rename(variable_group = row_cat) %>%
+    drop_na()
+  
+  print(df)
   
   # Convert the dataframe to a matrix (excluding the 'variable_group' column)
   df_matrix <- as.matrix(df[, -1])
@@ -325,9 +333,11 @@ pregnant_r <- process_data(clean_data, "pregnant")
 testing_history_r <- process_data(clean_data, "testing_history")
 since_last_test_r <- process_data(clean_data, "since_last_test")
 prep_use_r <- process_data(clean_data, "prep_use")
-#modality_r <- process_data(clean_data, "modality")
-#other_pitc_r <- process_data(clean_data, "other_pitc")
-#pns_identified_r <- process_data(clean_data, "pns_identified")
+
+clean_modality <- clean_data %>% drop_na(modality)
+modality_r <- process_data(clean_data, "modality")
+other_pitc_r <- process_data(clean_data, "other_pitc")
+pns_identified_r <- process_data(clean_data, "pns_identified")
 ```
 
 ```{r}
@@ -355,7 +365,7 @@ table_two <- combined_results %>%
   mutate(row_var = case_match(row_var,
                               "age_group" ~ "Age",
                               "sex" ~ "Sex",
-                              "pregant" ~ "Pregnancy Status",
+                              "pregnant" ~ "Pregnancy Status",
                               "testing_history" ~ "Testing History",
                               "since_last_test" ~ "Time since last test",
                               "prep_use" ~ "PrEP use",
