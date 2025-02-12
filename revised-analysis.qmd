@@ -334,7 +334,6 @@ testing_history_r <- process_data(clean_data, "testing_history")
 since_last_test_r <- process_data(clean_data, "since_last_test")
 prep_use_r <- process_data(clean_data, "prep_use")
 
-clean_modality <- clean_data %>% drop_na(modality)
 modality_r <- process_data(clean_data, "modality")
 other_pitc_r <- process_data(clean_data, "other_pitc")
 pns_identified_r <- process_data(clean_data, "pns_identified")
@@ -347,7 +346,10 @@ combined_results <- bind_rows(
   pregnant_r,
   testing_history_r,
   since_last_test_r,
-  prep_use_r
+  prep_use_r,
+  modality_r,
+  other_pitc_r,
+  pns_identified_r
 ) |>
   mutate(cpr = case_when(
     str_detect(cpr, "NA") ~ "Ref",  # Check for the string "NA"
@@ -369,6 +371,9 @@ table_two <- combined_results %>%
                               "testing_history" ~ "Testing History",
                               "since_last_test" ~ "Time since last test",
                               "prep_use" ~ "PrEP use",
+                              "modality" ~ "Modality",
+                              "other_pitc" ~ "Other PITC",
+                              "pns_identified" ~ "Identified through PNS",
                               .default = row_var))|>
   gt(
     groupname_col = "row_var"
@@ -405,7 +410,7 @@ table_two <- combined_results %>%
     Recent_percent_95 = "% Recent (95% CI)",
     cpr = "Crude Prevalence Ratio (95% CI)"
   ) %>%
-  tab_options(data_row.padding = px(1))
+  tab_options(data_row.padding = px(0.5))
 
 gtsave(table_two, "output/table_2.png")
 
@@ -418,7 +423,7 @@ gtsave(table_two, "table_2.html")
 gtsave(table_two, "output/table_2.html")
 
 # Open the HTML file and copy the table
-browseURL("output/table_2.html")
+#browseURL("output/table_2.html")
 
 ```
 
